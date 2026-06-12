@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
 	"net"
+	"os"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -60,6 +63,64 @@ func main() {
 	packetSource := gopacket.NewPacketSource(hDrive, hDrive.LinkType())
 	for packet := range packetSource.Packets() {
 		icmpLayer := packet.Layer(layers.LayerTypeICMPv4)
-		fmt.Printf("ICMP Layer: %+v\n", icmpLayer)
+		icmp := icmpLayer.(*layers.ICMPv4)
+		fmt.Println(icmp.Id)
+		fmt.Println(icmp.Seq)
+		fmt.Println(hex.Dump(icmp.Payload))
+		replyBytes, err := createIcmpPacket(packet)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("-------------------------1")
+		err = hDrive.WritePacketData(replyBytes)
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("-------------------------2")
 	}
+}
+
+func createIcmpPacket(reqPacket gopacket.Packet) ([]byte, error) {
+	ethPacket := reqPacket.Layer(layers.LayerTypeEthernet)
+	ethLayer := ethPacket.(*layers.Ethernet)
+	ipPacket := reqPacket.Layer(layers.LayerTypeIPv4)
+	ipLayer := ipPacket.(*layers.IPv4)
+	icmpPacket := reqPacket.Layer(layers.LayerTypeICMPv4)
+	icmpLayer := icmpPacket.(*layers.ICMPv4)
+	buffer := gopacket.NewSerializeBuffer()
+	options := gopacket.SerializeOptions{
+		FixLengths:       true,
+		ComputeChecksums: true,
+	}
+	replyEth := &layers.Ethernet{
+		SrcMAC:       ethLayer.DstMAC,
+		DstMAC:       ethLayer.SrcMAC,
+		EthernetType: layers.EthernetTypeIPv4,
+	}
+	replyIp := &layers.IPv4{
+		SrcIP:    ipLayer.DstIP,
+		DstIP:    ipLayer.SrcIP,
+		Protocol: layers.IPProtocolICMPv4,
+		Version:  4,
+		TTL:      64,
+	}
+	replyIcmp := &layers.ICMPv4{
+		TypeCode: layers.ICMPv4TypeEchoReply,
+		Id:       icmpLayer.Id,
+		Seq:      icmpLayer.Seq,
+	}
+	inputData, err := userInput()
+	if err != nil {
+		return nil, err
+	}
+	customData := gopacket.Payload(inputData)
+	err = gopacket.SerializeLayers(buffer, options, replyEth, replyIp, replyIcmp, customData)
+	return buffer.Bytes(), err
+}
+
+func userInput() ([]byte, error) {
+	fmt.Printf("userInput:")
+	reader := bufio.NewReader(os.Stdin)
+	line, _, err := reader.ReadLine()
+	return line, err
 }
