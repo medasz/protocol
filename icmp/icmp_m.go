@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -40,7 +39,17 @@ func getIf(ifs []pcap.Interface) (pcap.Interface, error) {
 	return pcap.Interface{}, errors.New("interface not found")
 }
 
+func startInputReader(inChan chan []byte) {
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Printf("userInput:")
+	for scanner.Scan() {
+		inChan <- scanner.Bytes()
+		fmt.Printf("userInput:")
+	}
+}
 func main() {
+	inChan := make(chan []byte)
+	go startInputReader(inChan)
 	fmt.Printf("src: %s, dst: %s\n", src, dst)
 	ifs, err := pcap.FindAllDevs()
 	if err != nil {
@@ -62,25 +71,25 @@ func main() {
 	}
 	packetSource := gopacket.NewPacketSource(hDrive, hDrive.LinkType())
 	for packet := range packetSource.Packets() {
-		icmpLayer := packet.Layer(layers.LayerTypeICMPv4)
-		icmp := icmpLayer.(*layers.ICMPv4)
-		fmt.Println(icmp.Id)
-		fmt.Println(icmp.Seq)
-		fmt.Println(hex.Dump(icmp.Payload))
-		replyBytes, err := createIcmpPacket(packet)
+		//icmpLayer := packet.Layer(layers.LayerTypeICMPv4)
+		//icmp := icmpLayer.(*layers.ICMPv4)
+		//fmt.Println(icmp.Id)
+		//fmt.Println(icmp.Seq)
+		//fmt.Println(hex.Dump(icmp.Payload))
+		replyBytes, err := createIcmpPacket(packet, inChan)
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println("-------------------------1")
+
 		err = hDrive.WritePacketData(replyBytes)
 		if err != nil {
 			panic(err)
 		}
-		fmt.Println("-------------------------2")
+
 	}
 }
 
-func createIcmpPacket(reqPacket gopacket.Packet) ([]byte, error) {
+func createIcmpPacket(reqPacket gopacket.Packet, inChan chan []byte) ([]byte, error) {
 	ethPacket := reqPacket.Layer(layers.LayerTypeEthernet)
 	ethLayer := ethPacket.(*layers.Ethernet)
 	ipPacket := reqPacket.Layer(layers.LayerTypeIPv4)
@@ -109,7 +118,7 @@ func createIcmpPacket(reqPacket gopacket.Packet) ([]byte, error) {
 		Id:       icmpLayer.Id,
 		Seq:      icmpLayer.Seq,
 	}
-	inputData, err := userInput()
+	inputData, err := userInput(inChan)
 	if err != nil {
 		return nil, err
 	}
@@ -118,9 +127,11 @@ func createIcmpPacket(reqPacket gopacket.Packet) ([]byte, error) {
 	return buffer.Bytes(), err
 }
 
-func userInput() ([]byte, error) {
-	fmt.Printf("userInput:")
-	reader := bufio.NewReader(os.Stdin)
-	line, _, err := reader.ReadLine()
-	return line, err
+func userInput(inChan chan []byte) ([]byte, error) {
+	select {
+	case input := <-inChan:
+		return input, nil
+	default:
+		return []byte{}, nil
+	}
 }
