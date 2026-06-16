@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -177,11 +178,18 @@ func getNextHopMAC(srcIP, dstIP net.IP) (net.HardwareAddr, error) {
 	}
 	return getMacByIP(targetIP)
 }
-func sendICMP(dstIP string, data []byte) error {
+
+func sendICMP(dstIP string, data []byte) ([]byte, error) {
 	dst := net.ParseIP(dstIP)
-	conn, _ := net.Dial("udp", dstIP+":80")
+
+	// 获取源 IP：向目标IP的80端口发起UDP连接（仅用于获取本机出口IP，不会真正发送数据）
+	conn, err := net.Dial("udp", dstIP+":80")
+	if err != nil {
+		return nil, fmt.Errorf("获取源IP失败: %v", err)
+	}
 	srcIP := conn.LocalAddr().(*net.UDPAddr).IP
 	conn.Close()
+
 	// 1. 自动获取本机源 MAC 地址 (SrcMAC)
 	var srcMAC net.HardwareAddr
 	ifaces, _ := net.Interfaces()
@@ -197,7 +205,7 @@ func sendICMP(dstIP string, data []byte) error {
 	// 2. 自动获取下一跳(网关或目标)的 MAC 地址 (DstMAC)
 	dstMAC, err := getNextHopMAC(srcIP, dst)
 	if err != nil {
-		return fmt.Errorf("自动获取目标 MAC 失败: %v", err)
+		return nil, fmt.Errorf("自动获取目标 MAC 失败: %v", err)
 	}
 	// 找到对应的网卡并打开
 	ifs, _ := pcap.FindAllDevs()
@@ -212,16 +220,15 @@ func sendICMP(dstIP string, data []byte) error {
 	}
 	handle, err := pcap.OpenLive(device, 65536, true, pcap.BlockForever)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("打开网卡失败: %v", err)
 	}
 	defer handle.Close()
-	// 3. 构造以太网头部 (成功补全)
+	// 3. 构造以太网头部
 	eth := &layers.Ethernet{
 		SrcMAC:       srcMAC,
 		DstMAC:       dstMAC,
 		EthernetType: layers.EthernetTypeIPv4,
 	}
-	// 后续逻辑保持不变，记得把 eth 放进序列化函数里
 	icmp := &layers.ICMPv4{
 		TypeCode: layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0),
 		Id:       1,
@@ -237,9 +244,41 @@ func sendICMP(dstIP string, data []byte) error {
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
 	payload := gopacket.Payload(data)
-	// ⚠️ 把 eth 加到序列化列表的最前面
 	gopacket.SerializeLayers(buffer, opts, eth, ip, icmp, payload)
-	return handle.WritePacketData(buffer.Bytes())
+	if err := handle.WritePacketData(buffer.Bytes()); err != nil {
+		return nil, fmt.Errorf("发送ICMP包失败: %v", err)
+	}
+
+	// 开始计时，等待接收回包
+	start := time.Now()
+	for {
+		// 检查总耗时是否超过了设定的 Timeout
+		if time.Since(start) > time.Duration(timeout)*time.Millisecond {
+			return nil, fmt.Errorf("timeout")
+		}
+		// 从网卡读取下一个抓到的包
+		data, _, err := handle.ReadPacketData()
+		if err != nil {
+			// 如果是底层网卡抓取超时，继续循环检查总超时
+			if err == pcap.NextErrorTimeoutExpired || err.Error() == "Timeout Expired" {
+				continue
+			}
+			continue
+		}
+		// 4. 解析收到的包
+		packet := gopacket.NewPacket(data, layers.LayerTypeEthernet, gopacket.Default)
+
+		// 提取 ICMP 层
+		if icmpLayer := packet.Layer(layers.LayerTypeICMPv4); icmpLayer != nil {
+			reply := icmpLayer.(*layers.ICMPv4)
+
+			// 严格校验：确保这是针对我们刚才发出请求的回应
+			if reply.Id == 1 && reply.Seq == 1 {
+				// 成功拿到回包数据！
+				return reply.Payload, nil
+			}
+		}
+	}
 }
 
 func main() {
@@ -265,9 +304,12 @@ func main() {
 		}
 		fmt.Println(string(outBuf))
 
-		err := sendICMP(target, outBuf)
+		replyData, err := sendICMP(target, outBuf)
 		if err != nil {
-			panic(err)
+			fmt.Println("sendICMP error:", err)
+		} else {
+			fmt.Printf("%s\n", hex.Dump(replyData))
+			stdin.Write(replyData)
 		}
 
 		time.Sleep(time.Duration(delay) * time.Millisecond)
