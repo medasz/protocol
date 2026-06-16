@@ -177,7 +177,7 @@ func getNextHopMAC(srcIP, dstIP net.IP) (net.HardwareAddr, error) {
 	}
 	return getMacByIP(targetIP)
 }
-func sendICMP(dstIP string) error {
+func sendICMP(dstIP string, data []byte) error {
 	dst := net.ParseIP(dstIP)
 	conn, _ := net.Dial("udp", dstIP+":80")
 	srcIP := conn.LocalAddr().(*net.UDPAddr).IP
@@ -236,7 +236,7 @@ func sendICMP(dstIP string) error {
 	}
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
-	payload := gopacket.Payload([]byte("ping data"))
+	payload := gopacket.Payload(data)
 	// ⚠️ 把 eth 加到序列化列表的最前面
 	gopacket.SerializeLayers(buffer, opts, eth, ip, icmp, payload)
 	return handle.WritePacketData(buffer.Bytes())
@@ -265,11 +265,12 @@ func main() {
 		}
 		fmt.Println(string(outBuf))
 
-		err := sendICMP(target)
+		err := sendICMP(target, outBuf)
 		if err != nil {
 			panic(err)
 		}
-		time.Sleep(time.Duration(delay) * time.Second)
+
+		time.Sleep(time.Duration(delay) * time.Millisecond)
 	}
 
 }
