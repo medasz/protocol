@@ -1,11 +1,8 @@
-//go:build master
-
 package main
 
 import (
 	"bufio"
 	"errors"
-	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -15,18 +12,12 @@ import (
 	"github.com/google/gopacket/pcap"
 )
 
-var (
+type masterConfig struct {
 	src string
 	dst string
-)
-
-func init() {
-	flag.StringVar(&src, "src", "", "Source IP address")
-	flag.StringVar(&dst, "dst", "", "Destination IP address")
-	flag.Parse()
 }
 
-func getIf(ifs []pcap.Interface) (pcap.Interface, error) {
+func getIf(ifs []pcap.Interface, src string) (pcap.Interface, error) {
 	srcIp := net.ParseIP(src).To4()
 	if srcIp == nil {
 		return pcap.Interface{}, errors.New("invalid ip")
@@ -50,42 +41,48 @@ func startInputReader(inChan chan []byte) {
 		inChan <- copied
 	}
 }
-func main() {
+
+func runMaster(cfg masterConfig) error {
+	if cfg.src == "" || cfg.dst == "" {
+		return errors.New("master requires both -src and -dst")
+	}
+
 	inChan := make(chan []byte)
 	go startInputReader(inChan)
-	fmt.Printf("src: %s, dst: %s\n", src, dst)
+	fmt.Printf("src: %s, dst: %s\n", cfg.src, cfg.dst)
 	ifs, err := pcap.FindAllDevs()
 	if err != nil {
-		panic(err)
+		return err
 	}
-	curIf, err := getIf(ifs)
+	curIf, err := getIf(ifs, cfg.src)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	hDrive, err := pcap.OpenLive(curIf.Name, 65536, true, pcap.BlockForever)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer hDrive.Close()
 
-	filterRule := fmt.Sprintf("icmp and src host %s and dst host %s and icmp[0] == 8", dst, src)
+	filterRule := fmt.Sprintf("icmp and src host %s and dst host %s and icmp[0] == 8", cfg.dst, cfg.src)
 	if err := hDrive.SetBPFFilter(filterRule); err != nil {
-		panic(err)
+		return err
 	}
 	packetSource := gopacket.NewPacketSource(hDrive, hDrive.LinkType())
 	for packet := range packetSource.Packets() {
 		printRequestPayload(packet)
 		replyBytes, err := createIcmpPacket(packet, inChan)
 		if err != nil {
-			panic(err)
+			return err
 		}
 
 		err = hDrive.WritePacketData(replyBytes)
 		if err != nil {
-			panic(err)
+			return err
 		}
 
 	}
+	return nil
 }
 
 func printRequestPayload(reqPacket gopacket.Packet) {

