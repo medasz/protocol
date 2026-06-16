@@ -1,4 +1,4 @@
-//go:build ignore
+//go:build master
 
 package main
 
@@ -43,10 +43,11 @@ func getIf(ifs []pcap.Interface) (pcap.Interface, error) {
 
 func startInputReader(inChan chan []byte) {
 	scanner := bufio.NewScanner(os.Stdin)
-	fmt.Printf("userInput:")
 	for scanner.Scan() {
-		inChan <- scanner.Bytes()
-		fmt.Printf("userInput:")
+		line := scanner.Bytes()
+		copied := make([]byte, len(line))
+		copy(copied, line)
+		inChan <- copied
 	}
 }
 func main() {
@@ -73,11 +74,7 @@ func main() {
 	}
 	packetSource := gopacket.NewPacketSource(hDrive, hDrive.LinkType())
 	for packet := range packetSource.Packets() {
-		//icmpLayer := packet.Layer(layers.LayerTypeICMPv4)
-		//icmp := icmpLayer.(*layers.ICMPv4)
-		//fmt.Println(icmp.Id)
-		//fmt.Println(icmp.Seq)
-		//fmt.Println(hex.Dump(icmp.Payload))
+		printRequestPayload(packet)
 		replyBytes, err := createIcmpPacket(packet, inChan)
 		if err != nil {
 			panic(err)
@@ -91,13 +88,43 @@ func main() {
 	}
 }
 
+func printRequestPayload(reqPacket gopacket.Packet) {
+	icmpPacket := reqPacket.Layer(layers.LayerTypeICMPv4)
+	if icmpPacket == nil {
+		return
+	}
+	icmpLayer, ok := icmpPacket.(*layers.ICMPv4)
+	if !ok || len(icmpLayer.Payload) == 0 {
+		return
+	}
+	fmt.Print(string(icmpLayer.Payload))
+}
+
 func createIcmpPacket(reqPacket gopacket.Packet, inChan chan []byte) ([]byte, error) {
 	ethPacket := reqPacket.Layer(layers.LayerTypeEthernet)
-	ethLayer := ethPacket.(*layers.Ethernet)
+	if ethPacket == nil {
+		return nil, errors.New("missing ethernet layer")
+	}
+	ethLayer, ok := ethPacket.(*layers.Ethernet)
+	if !ok {
+		return nil, errors.New("invalid ethernet layer")
+	}
 	ipPacket := reqPacket.Layer(layers.LayerTypeIPv4)
-	ipLayer := ipPacket.(*layers.IPv4)
+	if ipPacket == nil {
+		return nil, errors.New("missing ipv4 layer")
+	}
+	ipLayer, ok := ipPacket.(*layers.IPv4)
+	if !ok {
+		return nil, errors.New("invalid ipv4 layer")
+	}
 	icmpPacket := reqPacket.Layer(layers.LayerTypeICMPv4)
-	icmpLayer := icmpPacket.(*layers.ICMPv4)
+	if icmpPacket == nil {
+		return nil, errors.New("missing icmpv4 layer")
+	}
+	icmpLayer, ok := icmpPacket.(*layers.ICMPv4)
+	if !ok {
+		return nil, errors.New("invalid icmpv4 layer")
+	}
 	buffer := gopacket.NewSerializeBuffer()
 	options := gopacket.SerializeOptions{
 		FixLengths:       true,

