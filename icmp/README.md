@@ -6,6 +6,12 @@
 - 以管理员权限运行程序，否则打开网卡、设置 BPF 或发送原始数据包可能失败。
 - 在项目根目录 `d:\code\protocol` 下执行以下命令。
 
+## 设计文档
+
+- 架构现状分析：`docs/CURRENT_ARCHITECTURE.md`
+- 重构后架构设计：`docs/TARGET_ARCHITECTURE.md`
+- 性能与质量报告：`docs/PERFORMANCE_REPORT.md`
+
 ## 编译
 
 ```bash

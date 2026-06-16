@@ -1,35 +1,42 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 )
 
+var errUsage = errors.New("usage")
+
 func main() {
-	if len(os.Args) < 2 {
-		printRootUsage()
-		os.Exit(1)
-	}
-
-	var err error
-	switch os.Args[1] {
-	case "master":
-		err = runMaster(parseMasterArgs(os.Args[2:]))
-	case "slave":
-		err = runSlave(parseSlaveArgs(os.Args[2:]))
-	case "-h", "--help", "help":
-		printRootUsage()
-		return
-	default:
-		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n\n", os.Args[1])
-		printRootUsage()
-		os.Exit(1)
-	}
-
-	if err != nil {
+	if err := runCLI(os.Args[1:]); err != nil {
+		if errors.Is(err, errUsage) {
+			os.Exit(1)
+		}
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+func runCLI(args []string) error {
+	if len(args) < 1 {
+		printRootUsage()
+		return errUsage
+	}
+
+	switch args[0] {
+	case "master":
+		return runMaster(parseMasterArgs(args[1:]))
+	case "slave":
+		return runSlave(parseSlaveArgs(args[1:]))
+	case "-h", "--help", "help":
+		printRootUsage()
+		return nil
+	default:
+		fmt.Fprintf(os.Stderr, "unknown subcommand: %s\n\n", args[0])
+		printRootUsage()
+		return errUsage
 	}
 }
 
