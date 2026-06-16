@@ -26,7 +26,7 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 			Resolver: transport.OSResolver{},
 		},
 		Commands: stdio.NewNonBlockingCommandSource(os.Stdin),
-		Results:  stdio.NewWriterResultSink(os.Stdout),
+		Results:  stdio.NewWriterResultSink(stdio.WrapConsoleWriter(os.Stdout)),
 	}
 }
 

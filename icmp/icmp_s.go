@@ -10,6 +10,7 @@ import (
 
 	"protocol/icmp/internal/app"
 	"protocol/icmp/internal/shell"
+	"protocol/icmp/internal/stdio"
 	"protocol/icmp/internal/transport"
 )
 
@@ -40,7 +41,7 @@ var buildSlaveRuntime = func(cfg slaveConfig) (serviceRunner, io.Closer, error) 
 			Delay:    time.Duration(cfg.delay) * time.Millisecond,
 			Timeout:  time.Duration(cfg.timeout) * time.Millisecond,
 			TestMode: cfg.isTest,
-			Logger:   os.Stdout,
+			Logger:   stdio.WrapConsoleWriter(os.Stdout),
 		},
 		Client: transport.PcapPollClient{
 			TargetIP: cfg.target,
