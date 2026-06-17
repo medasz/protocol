@@ -45,8 +45,10 @@ func parseMasterArgs(args []string) masterConfig {
 	cfg := masterConfig{}
 	fs.StringVar(&cfg.src, "src", "", "Source IP address")
 	fs.StringVar(&cfg.dst, "dst", "", "Destination IP address")
+	fs.BoolVar(&cfg.web, "web", false, "Enable Web Dashboard")
+	fs.StringVar(&cfg.port, "port", "8080", "Port for Web Dashboard")
 	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s master -src <ip> -dst <ip>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s master -src <ip> -dst <ip> [options]\n", os.Args[0])
 		fs.PrintDefaults()
 	}
 	fs.Parse(args)

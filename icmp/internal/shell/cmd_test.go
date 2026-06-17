@@ -82,14 +82,6 @@ func TestClose(t *testing.T) {
 	}
 }
 
-func TestCloneBytes(t *testing.T) {
-	src := []byte("abc")
-	dst := cloneBytes(src)
-	src[0] = 'z'
-	if string(dst) != "abc" {
-		t.Fatalf("cloneBytes() = %q, want %q", dst, "abc")
-	}
-}
 
 func TestCmdEncodingRoundTripChinese(t *testing.T) {
 	rawGBK, err := simplifiedchinese.GB18030.NewEncoder().Bytes([]byte("中文输出"))

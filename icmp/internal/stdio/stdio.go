@@ -2,6 +2,7 @@ package stdio
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"io"
 	"sync"
@@ -22,7 +23,7 @@ func (s *NonBlockingCommandSource) NextCommand(ctx context.Context) ([]byte, err
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case data := <-s.ch:
-		return cloneBytes(data), nil
+		return bytes.Clone(data), nil
 	default:
 		return nil, nil
 	}
@@ -31,7 +32,7 @@ func (s *NonBlockingCommandSource) NextCommand(ctx context.Context) ([]byte, err
 func (s *NonBlockingCommandSource) scan(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
-		s.ch <- cloneBytes(scanner.Bytes())
+		s.ch <- bytes.Clone(scanner.Bytes())
 	}
 }
 
@@ -54,11 +55,3 @@ func (s *WriterResultSink) WriteResult(payload []byte) error {
 	return err
 }
 
-func cloneBytes(data []byte) []byte {
-	if len(data) == 0 {
-		return nil
-	}
-	cloned := make([]byte, len(data))
-	copy(cloned, data)
-	return cloned
-}
