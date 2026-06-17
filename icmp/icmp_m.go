@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"protocol/icmp/internal/app"
@@ -26,15 +27,25 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 	var results app.ResultSink
 
 	if cfg.web {
-		bridge := web.NewWsBridge()
-		srv := web.NewServer(bridge, cfg.dst)
+		hub := web.NewHub()
+		srv := web.NewServer(hub)
 		go func() {
 			if err := srv.Start(":" + cfg.port); err != nil {
 				os.Exit(1)
 			}
 		}()
-		cmds = bridge
-		results = bridge
+		cmds = hub
+		results = hub
+		return app.MasterService{
+			Responder: transport.PcapMasterResponder{
+				SrcIP:         cfg.src,
+				AllowedDstIPs: parseMasterDstAllowlist(cfg.dst),
+				Resolver:      transport.OSResolver{},
+			},
+			Commands: cmds,
+			Results:  results,
+			Agents:   hub,
+		}
 	} else {
 		cmds = stdio.NewNonBlockingCommandSource(os.Stdin)
 		results = stdio.NewWriterResultSink(stdio.WrapConsoleWriter(os.Stdout))
@@ -42,9 +53,9 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 
 	return app.MasterService{
 		Responder: transport.PcapMasterResponder{
-			SrcIP:    cfg.src,
-			DstIP:    cfg.dst,
-			Resolver: transport.OSResolver{},
+			SrcIP:         cfg.src,
+			AllowedDstIPs: parseMasterDstAllowlist(cfg.dst),
+			Resolver:      transport.OSResolver{},
 		},
 		Commands: cmds,
 		Results:  results,
@@ -52,5 +63,8 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 }
 
 func runMaster(cfg masterConfig) error {
+	if !cfg.web && len(parseMasterDstAllowlist(cfg.dst)) != 1 {
+		return fmt.Errorf("master without -web requires exactly one -dst target")
+	}
 	return buildMasterRunner(cfg).Run(context.Background())
 }

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 )
 
 var errUsage = errors.New("usage")
@@ -53,6 +54,21 @@ func parseMasterArgs(args []string) masterConfig {
 	}
 	fs.Parse(args)
 	return cfg
+}
+
+func parseMasterDstAllowlist(dst string) []string {
+	if strings.TrimSpace(dst) == "" {
+		return nil
+	}
+	parts := strings.Split(dst, ",")
+	allowlist := make([]string, 0, len(parts))
+	for _, part := range parts {
+		ip := strings.TrimSpace(part)
+		if ip != "" {
+			allowlist = append(allowlist, ip)
+		}
+	}
+	return allowlist
 }
 
 func parseSlaveArgs(args []string) slaveConfig {

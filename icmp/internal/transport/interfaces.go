@@ -8,7 +8,7 @@ import (
 )
 
 type MasterResponder interface {
-	Serve(context.Context, func(context.Context, protocol.Exchange) ([]byte, error)) error
+	Serve(context.Context, func(context.Context, protocol.RequestContext) ([]byte, error)) error
 }
 
 type PollClient interface {

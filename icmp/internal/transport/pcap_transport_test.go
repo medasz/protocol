@@ -21,10 +21,12 @@ type fakeResolver struct {
 	err       error
 }
 
-func (f fakeResolver) ResolveSourceIP(string) (net.IP, error)                 { return f.sourceIP, f.err }
-func (f fakeResolver) ResolveSourceMAC(net.IP) (net.HardwareAddr, error)      { return f.sourceMAC, f.err }
-func (f fakeResolver) ResolveDeviceByIP(net.IP) (string, error)               { return f.device, f.err }
-func (f fakeResolver) ResolveNextHopMAC(net.IP, net.IP) (net.HardwareAddr, error) { return f.nextHop, f.err }
+func (f fakeResolver) ResolveSourceIP(string) (net.IP, error)            { return f.sourceIP, f.err }
+func (f fakeResolver) ResolveSourceMAC(net.IP) (net.HardwareAddr, error) { return f.sourceMAC, f.err }
+func (f fakeResolver) ResolveDeviceByIP(net.IP) (string, error)          { return f.device, f.err }
+func (f fakeResolver) ResolveNextHopMAC(net.IP, net.IP) (net.HardwareAddr, error) {
+	return f.nextHop, f.err
+}
 
 type fakeHandle struct {
 	filter      string
@@ -81,16 +83,19 @@ func TestPcapMasterResponderServe(t *testing.T) {
 	close(fh.packetsChan)
 
 	responder := PcapMasterResponder{
-		SrcIP:    "10.0.0.1",
-		DstIP:    "10.0.0.2",
-		Resolver: fakeResolver{device: "eth0"},
+		SrcIP:         "10.0.0.1",
+		AllowedDstIPs: []string{"10.0.0.2"},
+		Resolver:      fakeResolver{device: "eth0"},
 	}
-	if err := responder.Serve(context.Background(), func(context.Context, protocol.Exchange) ([]byte, error) {
+	if err := responder.Serve(context.Background(), func(_ context.Context, req protocol.RequestContext) ([]byte, error) {
+		if got, want := req.Meta.SrcIP.String(), "10.0.0.2"; got != want {
+			t.Fatalf("request source IP = %q, want %q", got, want)
+		}
 		return []byte("whoami"), nil
 	}); err != nil {
 		t.Fatalf("Serve() error = %v", err)
 	}
-	if got, want := fh.filter, BuildMasterFilter("10.0.0.2", "10.0.0.1"); got != want {
+	if got, want := fh.filter, BuildMasterFilter([]string{"10.0.0.2"}, "10.0.0.1"); got != want {
 		t.Fatalf("filter = %q, want %q", got, want)
 	}
 	if len(fh.writes) != 1 {
