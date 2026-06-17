@@ -2,6 +2,5 @@ package frontend
 
 import "embed"
 
-//go:embed dist/*
-//go:embed dist/assets/*
+//go:embed all:dist
 var DistFS embed.FS
