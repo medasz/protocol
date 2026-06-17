@@ -1,7 +1,9 @@
 package shell
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os/exec"
 	"unicode/utf8"
@@ -64,7 +66,7 @@ func (s *CmdShell) ReadOutput(ctx context.Context) ([]byte, error) {
 		if !ok {
 			return nil, io.EOF
 		}
-		return cloneBytes(data), nil
+		return bytes.Clone(data), nil
 	default:
 		return nil, nil
 	}
@@ -82,16 +84,14 @@ func (s *CmdShell) Execute(command []byte) error {
 }
 
 func (s *CmdShell) Close() error {
-	var firstErr error
+	var errs []error
 	if s.stdin != nil {
-		firstErr = s.stdin.Close()
+		errs = append(errs, s.stdin.Close())
 	}
 	if s.stdout != nil {
-		if err := s.stdout.Close(); firstErr == nil {
-			firstErr = err
-		}
+		errs = append(errs, s.stdout.Close())
 	}
-	return firstErr
+	return errors.Join(errs...)
 }
 
 func pumpOutput(r io.Reader, out chan<- []byte, bufferSize int) {
@@ -134,13 +134,13 @@ func flushUTF8Chunks(out chan<- []byte, pending []byte, chunkSize int, flushAll 
 		sendLen := lastValidUTF8Prefix(pending[:limit])
 		if sendLen == 0 {
 			if flushAll && utf8.Valid(pending) {
-				out <- cloneBytes(pending)
+				out <- bytes.Clone(pending)
 				return nil
 			}
 			break
 		}
 
-		out <- cloneBytes(pending[:sendLen])
+		out <- bytes.Clone(pending[:sendLen])
 		pending = pending[sendLen:]
 		if !flushAll && len(pending) < chunkSize && !utf8.FullRune(pending) {
 			break
@@ -164,11 +164,3 @@ func lastValidUTF8Prefix(data []byte) int {
 	return 0
 }
 
-func cloneBytes(data []byte) []byte {
-	if len(data) == 0 {
-		return nil
-	}
-	cloned := make([]byte, len(data))
-	copy(cloned, data)
-	return cloned
-}

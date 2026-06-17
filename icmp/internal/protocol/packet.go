@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"errors"
 	"net"
 
@@ -35,15 +36,15 @@ func ParseEchoRequest(packet gopacket.Packet) (RequestContext, error) {
 
 	return RequestContext{
 		Meta: PacketMeta{
-			SrcMAC: cloneHardwareAddr(ethLayer.SrcMAC),
-			DstMAC: cloneHardwareAddr(ethLayer.DstMAC),
-			SrcIP:  cloneIP(ipLayer.SrcIP),
-			DstIP:  cloneIP(ipLayer.DstIP),
+			SrcMAC: bytes.Clone(ethLayer.SrcMAC),
+			DstMAC: bytes.Clone(ethLayer.DstMAC),
+			SrcIP:  bytes.Clone(ipLayer.SrcIP),
+			DstIP:  bytes.Clone(ipLayer.DstIP),
 		},
 		Exchange: Exchange{
 			ID:      icmpLayer.Id,
 			Seq:     icmpLayer.Seq,
-			Payload: ClonePayload(icmpLayer.Payload),
+			Payload: bytes.Clone(icmpLayer.Payload),
 		},
 	}, nil
 }
@@ -57,21 +58,21 @@ func ParseEchoReply(data []byte) (Exchange, error) {
 	return Exchange{
 		ID:      icmpLayer.Id,
 		Seq:     icmpLayer.Seq,
-		Payload: ClonePayload(icmpLayer.Payload),
+		Payload: bytes.Clone(icmpLayer.Payload),
 	}, nil
 }
 
 func BuildEchoReply(req RequestContext, payload []byte) ([]byte, error) {
 	replyMeta := PacketMeta{
-		SrcMAC: cloneHardwareAddr(req.Meta.DstMAC),
-		DstMAC: cloneHardwareAddr(req.Meta.SrcMAC),
-		SrcIP:  cloneIP(req.Meta.DstIP),
-		DstIP:  cloneIP(req.Meta.SrcIP),
+		SrcMAC: bytes.Clone(req.Meta.DstMAC),
+		DstMAC: bytes.Clone(req.Meta.SrcMAC),
+		SrcIP:  bytes.Clone(req.Meta.DstIP),
+		DstIP:  bytes.Clone(req.Meta.SrcIP),
 	}
 	reply := Exchange{
 		ID:      req.Exchange.ID,
 		Seq:     req.Exchange.Seq,
-		Payload: ClonePayload(payload),
+		Payload: bytes.Clone(payload),
 	}
 	return buildPacket(replyMeta, layers.ICMPv4TypeEchoReply, reply)
 }
@@ -80,7 +81,7 @@ func BuildEchoRequest(meta PacketMeta, msg Exchange) ([]byte, error) {
 	return buildPacket(meta, layers.CreateICMPv4TypeCode(layers.ICMPv4TypeEchoRequest, 0), Exchange{
 		ID:      msg.ID,
 		Seq:     msg.Seq,
-		Payload: ClonePayload(msg.Payload),
+		Payload: bytes.Clone(msg.Payload),
 	})
 }
 
@@ -92,13 +93,13 @@ func buildPacket(meta PacketMeta, typeCode layers.ICMPv4TypeCode, msg Exchange) 
 	}
 
 	eth := &layers.Ethernet{
-		SrcMAC:       cloneHardwareAddr(meta.SrcMAC),
-		DstMAC:       cloneHardwareAddr(meta.DstMAC),
+		SrcMAC:       bytes.Clone(meta.SrcMAC),
+		DstMAC:       bytes.Clone(meta.DstMAC),
 		EthernetType: layers.EthernetTypeIPv4,
 	}
 	ip := &layers.IPv4{
-		SrcIP:    cloneIP(meta.SrcIP),
-		DstIP:    cloneIP(meta.DstIP),
+		SrcIP:    bytes.Clone(meta.SrcIP),
+		DstIP:    bytes.Clone(meta.DstIP),
 		Protocol: layers.IPProtocolICMPv4,
 		Version:  4,
 		TTL:      64,
@@ -115,51 +116,34 @@ func buildPacket(meta PacketMeta, typeCode layers.ICMPv4TypeCode, msg Exchange) 
 	return buffer.Bytes(), nil
 }
 
+func getLayer[T any](packet gopacket.Packet, layerType gopacket.LayerType, errMissing error) (T, error) {
+	var zero T
+	layer := packet.Layer(layerType)
+	if layer == nil {
+		return zero, errMissing
+	}
+	tLayer, ok := layer.(T)
+	if !ok {
+		return zero, ErrInvalidLayer
+	}
+	return tLayer, nil
+}
+
 func extractLayers(packet gopacket.Packet) (*layers.Ethernet, *layers.IPv4, *layers.ICMPv4, error) {
-	ethPacket := packet.Layer(layers.LayerTypeEthernet)
-	if ethPacket == nil {
-		return nil, nil, nil, ErrMissingEthernet
-	}
-	ethLayer, ok := ethPacket.(*layers.Ethernet)
-	if !ok {
-		return nil, nil, nil, ErrInvalidLayer
+	ethLayer, err := getLayer[*layers.Ethernet](packet, layers.LayerTypeEthernet, ErrMissingEthernet)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
-	ipPacket := packet.Layer(layers.LayerTypeIPv4)
-	if ipPacket == nil {
-		return nil, nil, nil, ErrMissingIPv4
-	}
-	ipLayer, ok := ipPacket.(*layers.IPv4)
-	if !ok {
-		return nil, nil, nil, ErrInvalidLayer
+	ipLayer, err := getLayer[*layers.IPv4](packet, layers.LayerTypeIPv4, ErrMissingIPv4)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
-	icmpPacket := packet.Layer(layers.LayerTypeICMPv4)
-	if icmpPacket == nil {
-		return nil, nil, nil, ErrMissingICMPv4
-	}
-	icmpLayer, ok := icmpPacket.(*layers.ICMPv4)
-	if !ok {
-		return nil, nil, nil, ErrInvalidLayer
+	icmpLayer, err := getLayer[*layers.ICMPv4](packet, layers.LayerTypeICMPv4, ErrMissingICMPv4)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 
 	return ethLayer, ipLayer, icmpLayer, nil
-}
-
-func cloneHardwareAddr(addr net.HardwareAddr) net.HardwareAddr {
-	if len(addr) == 0 {
-		return nil
-	}
-	cloned := make(net.HardwareAddr, len(addr))
-	copy(cloned, addr)
-	return cloned
-}
-
-func cloneIP(ip net.IP) net.IP {
-	if len(ip) == 0 {
-		return nil
-	}
-	cloned := make(net.IP, len(ip))
-	copy(cloned, ip)
-	return cloned
 }
