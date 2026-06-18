@@ -8,8 +8,14 @@ import (
 )
 
 func TestBuildFilters(t *testing.T) {
-	if got, want := BuildMasterFilter("10.0.0.2", "10.0.0.1"), "icmp and src host 10.0.0.2 and dst host 10.0.0.1 and icmp[0] == 8"; got != want {
-		t.Fatalf("BuildMasterFilter() = %q, want %q", got, want)
+	if got, want := BuildMasterFilter(nil, "10.0.0.1"), "icmp and dst host 10.0.0.1 and icmp[0] == 8"; got != want {
+		t.Fatalf("BuildMasterFilter(nil) = %q, want %q", got, want)
+	}
+	if got, want := BuildMasterFilter([]string{"10.0.0.2"}, "10.0.0.1"), "icmp and dst host 10.0.0.1 and icmp[0] == 8 and (src host 10.0.0.2)"; got != want {
+		t.Fatalf("BuildMasterFilter(single) = %q, want %q", got, want)
+	}
+	if got, want := BuildMasterFilter([]string{"10.0.0.2", "10.0.0.3"}, "10.0.0.1"), "icmp and dst host 10.0.0.1 and icmp[0] == 8 and (src host 10.0.0.2 or src host 10.0.0.3)"; got != want {
+		t.Fatalf("BuildMasterFilter(multiple) = %q, want %q", got, want)
 	}
 	if got, want := BuildSlaveFilter("10.0.0.2"), "icmp and host 10.0.0.2 and icmp[0] == 0"; got != want {
 		t.Fatalf("BuildSlaveFilter() = %q, want %q", got, want)

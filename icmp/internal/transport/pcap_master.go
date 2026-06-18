@@ -11,12 +11,12 @@ import (
 )
 
 type PcapMasterResponder struct {
-	SrcIP    string
-	DstIP    string
-	Resolver AddressResolver
+	SrcIP         string
+	AllowedDstIPs []string
+	Resolver      AddressResolver
 }
 
-func (r PcapMasterResponder) Serve(ctx context.Context, handler func(context.Context, protocol.Exchange) ([]byte, error)) error {
+func (r PcapMasterResponder) Serve(ctx context.Context, handler func(context.Context, protocol.RequestContext) ([]byte, error)) error {
 	srcIP := net.ParseIP(r.SrcIP).To4()
 	if srcIP == nil {
 		return fmt.Errorf("invalid ip")
@@ -31,7 +31,7 @@ func (r PcapMasterResponder) Serve(ctx context.Context, handler func(context.Con
 	}
 	defer handle.Close()
 
-	if err := handle.SetBPFFilter(BuildMasterFilter(r.DstIP, r.SrcIP)); err != nil {
+	if err := handle.SetBPFFilter(BuildMasterFilter(r.AllowedDstIPs, r.SrcIP)); err != nil {
 		return err
 	}
 
@@ -48,7 +48,7 @@ func (r PcapMasterResponder) Serve(ctx context.Context, handler func(context.Con
 			if err != nil {
 				return err
 			}
-			replyPayload, err := handler(ctx, req.Exchange)
+			replyPayload, err := handler(ctx, req)
 			if err != nil {
 				return err
 			}

@@ -14,6 +14,19 @@ func TestParseMasterArgs(t *testing.T) {
 	}
 }
 
+func TestParseMasterDstAllowlist(t *testing.T) {
+	got := parseMasterDstAllowlist("10.0.0.2, 10.0.0.3")
+	want := []string{"10.0.0.2", "10.0.0.3"}
+	if len(got) != len(want) {
+		t.Fatalf("allowlist length = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("allowlist[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestParseSlaveArgs(t *testing.T) {
 	cfg := parseSlaveArgs([]string{"-t", "10.0.0.1", "-d", "500", "-o", "2000", "-s", "128", "-r"})
 	if cfg.target != "10.0.0.1" || cfg.delay != 500 || cfg.timeout != 2000 || cfg.maxDataSize != 128 || !cfg.isTest {
@@ -57,6 +70,12 @@ func TestRunMasterUsesBuilder(t *testing.T) {
 	}
 	if !runner.called {
 		t.Fatal("expected runner to be called")
+	}
+}
+
+func TestRunMasterRequiresDstWithoutWeb(t *testing.T) {
+	if err := runMaster(masterConfig{src: "10.0.0.1"}); err == nil {
+		t.Fatal("expected error")
 	}
 }
 

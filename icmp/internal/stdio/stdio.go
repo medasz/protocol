@@ -18,7 +18,7 @@ func NewNonBlockingCommandSource(r io.Reader) *NonBlockingCommandSource {
 	return src
 }
 
-func (s *NonBlockingCommandSource) NextCommand(ctx context.Context) ([]byte, error) {
+func (s *NonBlockingCommandSource) NextCommand(ctx context.Context, _ string) ([]byte, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -45,7 +45,7 @@ func NewWriterResultSink(w io.Writer) *WriterResultSink {
 	return &WriterResultSink{w: w}
 }
 
-func (s *WriterResultSink) WriteResult(payload []byte) error {
+func (s *WriterResultSink) WriteResult(_ string, payload []byte) error {
 	if len(payload) == 0 {
 		return nil
 	}
@@ -54,4 +54,3 @@ func (s *WriterResultSink) WriteResult(payload []byte) error {
 	_, err := s.w.Write(payload)
 	return err
 }
-

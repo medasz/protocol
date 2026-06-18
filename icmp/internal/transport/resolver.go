@@ -8,8 +8,12 @@ import (
 	"github.com/google/gopacket/pcap"
 )
 
-func BuildMasterFilter(srcHost, dstHost string) string {
-	return "icmp and src host " + srcHost + " and dst host " + dstHost + " and icmp[0] == 8"
+func BuildMasterFilter(srcHosts []string, dstHost string) string {
+	filter := "icmp and dst host " + dstHost + " and icmp[0] == 8"
+	if len(srcHosts) == 0 {
+		return filter
+	}
+	return filter + " and (src host " + strings.Join(srcHosts, " or src host ") + ")"
 }
 
 func BuildSlaveFilter(host string) string {
