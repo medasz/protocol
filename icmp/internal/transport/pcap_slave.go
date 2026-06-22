@@ -46,6 +46,9 @@ func (c PcapPollClient) Exchange(ctx context.Context, payload []byte) ([]byte, e
 	}
 	defer handle.Close()
 
+	// Prepend ProtocolID (ProtocolShell=1) for backward compatibility in polling mode
+	payloadWithProto := append([]byte{protocol.ProtocolShell}, payload...)
+
 	requestBytes, err := protocol.BuildEchoRequest(protocol.PacketMeta{
 		SrcMAC: srcMAC,
 		DstMAC: dstMAC,
@@ -54,7 +57,7 @@ func (c PcapPollClient) Exchange(ctx context.Context, payload []byte) ([]byte, e
 	}, protocol.Exchange{
 		ID:      c.ID,
 		Seq:     c.Seq,
-		Payload: payload,
+		Payload: payloadWithProto,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("序列化 ICMP 包失败: %v", err)
@@ -84,6 +87,13 @@ func (c PcapPollClient) Exchange(ctx context.Context, payload []byte) ([]byte, e
 			continue
 		}
 		if reply.ID == c.ID && reply.Seq == c.Seq {
+			if len(reply.Payload) > 0 {
+				if reply.Payload[0] == protocol.ProtocolShell {
+					return reply.Payload[1:], nil
+				}
+				// If it's ProtocolTunnel, ignore it in the polling client
+				continue
+			}
 			return reply.Payload, nil
 		}
 	}

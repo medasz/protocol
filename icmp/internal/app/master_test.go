@@ -53,9 +53,9 @@ func TestMasterServiceRun(t *testing.T) {
 		Responder: fakeMasterResponder{
 			request: protocol.RequestContext{
 				Meta:     protocol.PacketMeta{SrcIP: mustIP(t, "10.0.0.2")},
-				Exchange: protocol.Exchange{Payload: []byte("result")},
+				Exchange: protocol.Exchange{Payload: append([]byte{protocol.ProtocolShell}, []byte("result")...)},
 			},
-			reply: []byte("whoami"),
+			reply: append([]byte{protocol.ProtocolShell}, []byte("whoami")...),
 		},
 		Commands: fakeCommandSource{dataByAgent: map[string][]byte{"10.0.0.2": []byte("whoami")}},
 		Results:  sink,
@@ -88,9 +88,9 @@ func TestMasterServiceRoutesCommandsAndResultsByAgentIP(t *testing.T) {
 			Responder: fakeMasterResponder{
 				request: protocol.RequestContext{
 					Meta:     protocol.PacketMeta{SrcIP: mustIP(t, tc.agentIP)},
-					Exchange: protocol.Exchange{Payload: []byte(tc.result)},
+					Exchange: protocol.Exchange{Payload: append([]byte{protocol.ProtocolShell}, []byte(tc.result)...)},
 				},
-				reply: []byte(tc.reply),
+				reply: append([]byte{protocol.ProtocolShell}, []byte(tc.reply)...),
 			},
 			Commands: commands,
 			Results:  sink,
@@ -109,9 +109,9 @@ func TestMasterServiceRunWithoutCommandSource(t *testing.T) {
 		Responder: fakeMasterResponder{
 			request: protocol.RequestContext{
 				Meta:     protocol.PacketMeta{SrcIP: mustIP(t, "10.0.0.2")},
-				Exchange: protocol.Exchange{Payload: []byte("result")},
+				Exchange: protocol.Exchange{Payload: append([]byte{protocol.ProtocolShell}, []byte("result")...)},
 			},
-			reply: nil,
+			reply: []byte{protocol.ProtocolShell},
 		},
 		Results: &fakeResultSink{},
 	}

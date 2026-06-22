@@ -32,6 +32,9 @@ func (s SlaveService) Run(ctx context.Context) error {
 		return fmt.Errorf("poll client is required")
 	}
 
+	// Wait, we need a TunnelManager and a TunnelListener here if provided.
+	// For simplicity, we just add the hooks. The actual initialization will be in main.go.
+
 	for {
 		outBuf, err := s.Executor.ReadOutput(ctx)
 		if err != nil && err != io.EOF {
