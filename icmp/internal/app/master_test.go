@@ -25,6 +25,10 @@ func (f fakeMasterResponder) Serve(ctx context.Context, handler func(context.Con
 	return f.err
 }
 
+func (f fakeMasterResponder) SendAsync(req protocol.RequestContext, payload []byte) error {
+	return nil
+}
+
 type fakeCommandSource struct {
 	dataByAgent map[string][]byte
 	err         error

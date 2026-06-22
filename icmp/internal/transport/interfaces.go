@@ -9,6 +9,7 @@ import (
 
 type MasterResponder interface {
 	Serve(context.Context, func(context.Context, protocol.RequestContext) ([]byte, error)) error
+	SendAsync(req protocol.RequestContext, payload []byte) error
 }
 
 type PollClient interface {

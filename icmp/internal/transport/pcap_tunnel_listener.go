@@ -14,9 +14,10 @@ import (
 type TunnelListener struct {
 	TargetIP string
 	Resolver AddressResolver
+	handle   packetHandle
 }
 
-func (l TunnelListener) Listen(ctx context.Context, handler func([]byte)) error {
+func (l *TunnelListener) Listen(ctx context.Context, handler func([]byte)) error {
 	dstIP := net.ParseIP(l.TargetIP)
 	if dstIP == nil {
 		return fmt.Errorf("invalid destination ip: %s", l.TargetIP)
@@ -35,7 +36,11 @@ func (l TunnelListener) Listen(ctx context.Context, handler func([]byte)) error 
 	if err != nil {
 		return err
 	}
-	defer handle.Close()
+	l.handle = handle
+	defer func() {
+		l.handle.Close()
+		l.handle = nil
+	}()
 
 	if err := handle.SetBPFFilter(BuildSlaveFilter(l.TargetIP)); err != nil {
 		return err
@@ -67,4 +72,41 @@ func (l TunnelListener) Listen(ctx context.Context, handler func([]byte)) error 
 			}
 		}
 	}
+}
+
+// SendAsync builds an EchoRequest and sends it to the target asynchronously.
+func (l *TunnelListener) SendAsync(payload []byte) error {
+	if l.handle == nil {
+		return fmt.Errorf("TunnelListener handle not initialized")
+	}
+
+	dstIP := net.ParseIP(l.TargetIP)
+	srcIP, err := l.Resolver.ResolveSourceIP(l.TargetIP)
+	if err != nil {
+		return err
+	}
+	srcMAC, err := l.Resolver.ResolveSourceMAC(srcIP)
+	if err != nil {
+		return err
+	}
+	dstMAC, err := l.Resolver.ResolveNextHopMAC(srcIP, dstIP)
+	if err != nil {
+		return err
+	}
+
+	requestBytes, err := protocol.BuildEchoRequest(protocol.PacketMeta{
+		SrcMAC: srcMAC,
+		DstMAC: dstMAC,
+		SrcIP:  srcIP,
+		DstIP:  dstIP,
+	}, protocol.Exchange{
+		ID:      1, // Dummy ID for Tunnel traffic
+		Seq:     1,
+		Payload: payload,
+	})
+	if err != nil {
+		return err
+	}
+
+	return l.handle.WritePacketData(requestBytes)
 }

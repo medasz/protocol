@@ -112,7 +112,7 @@ func TestPcapPollClientExchange(t *testing.T) {
 		DstMAC: mustMAC(t, "66:77:88:99:aa:bb"),
 		SrcIP:  net.ParseIP("10.0.0.2").To4(),
 		DstIP:  net.ParseIP("10.0.0.1").To4(),
-	}, protocol.Exchange{ID: 9, Seq: 10, Payload: []byte("ok")})
+	}, protocol.Exchange{ID: 9, Seq: 10, Payload: append([]byte{protocol.ProtocolShell}, []byte("ok")...)})
 	if err != nil {
 		t.Fatalf("BuildEchoRequest() error = %v", err)
 	}

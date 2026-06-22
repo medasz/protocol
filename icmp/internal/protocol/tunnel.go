@@ -19,6 +19,12 @@ const (
 	TunnelTypeFIN  uint8 = 4 // 断开连接
 )
 
+// Tunnel application commands
+const (
+	CmdShell   uint8 = 1 // Request an interactive shell
+	CmdTCPDial uint8 = 2 // Request a TCP dial (port forwarding/socks)
+)
+
 // TunnelHeaderSize is the total size of the serialized TunnelHeader.
 // 4 (SessionID) + 1 (Type) + 4 (Seq) + 4 (Ack) + 2 (Length) + 1 (Padding) = 16 bytes
 const TunnelHeaderSize = 16

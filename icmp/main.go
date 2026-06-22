@@ -48,6 +48,10 @@ func parseMasterArgs(args []string) masterConfig {
 	fs.StringVar(&cfg.dst, "dst", "", "Destination IP address")
 	fs.BoolVar(&cfg.web, "web", false, "Enable Web Dashboard")
 	fs.StringVar(&cfg.port, "port", "8080", "Port for Web Dashboard")
+	fs.BoolVar(&cfg.shell, "shell", false, "Enable traditional polling shell console")
+	fs.BoolVar(&cfg.pty, "pty", false, "Enable advanced interactive PTY shell")
+	fs.StringVar(&cfg.socks, "socks", "", "Enable Socks5 proxy on specified port (e.g., 1080)")
+	fs.StringVar(&cfg.fwd, "fwd", "", "Enable local port forwarding (e.g., 33890:127.0.0.1:3389)")
 	fs.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s master -src <ip> -dst <ip> [options]\n", os.Args[0])
 		fs.PrintDefaults()

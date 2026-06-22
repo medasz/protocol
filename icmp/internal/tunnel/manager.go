@@ -16,6 +16,10 @@ type TunnelManager struct {
 	mu       sync.RWMutex
 	sessions map[uint32]*ICMPConn
 	sender   SendFunc
+
+	// OnSYN is called when a new SYN packet is received.
+	// The callback receives the new connection and the SYN payload.
+	OnSYN func(conn net.Conn, payload []byte)
 }
 
 // NewTunnelManager creates a new TunnelManager.
@@ -41,14 +45,29 @@ func (m *TunnelManager) HandlePacket(b []byte) {
 	m.mu.RUnlock()
 
 	if !exists {
-		// If it's a SYN, maybe we should create a new connection (Server mode).
-		// For now, let's keep it simple and assume connections are created manually or via SYN.
 		if header.Type == protocol.TunnelTypeSYN {
 			conn = newICMPConn(header.SessionID, m.sender)
 			m.mu.Lock()
 			m.sessions[header.SessionID] = conn
 			m.mu.Unlock()
-			// Handle SYN by responding with ACK or similar logic
+			
+			// Send an ACK for SYN (reliable handshake)
+			ackBytes := make([]byte, protocol.TunnelHeaderSize)
+			ackHeader := protocol.TunnelHeader{
+				SessionID: header.SessionID,
+				Type:      protocol.TunnelTypeACK,
+			}
+			_ = ackHeader.Marshal(ackBytes)
+			_ = m.sender(context.Background(), ackBytes)
+
+			if m.OnSYN != nil {
+				var synPayload []byte
+				if header.Length > 0 && int(protocol.TunnelHeaderSize+header.Length) <= len(b) {
+					synPayload = b[protocol.TunnelHeaderSize : protocol.TunnelHeaderSize+header.Length]
+				}
+				go m.OnSYN(conn, synPayload)
+			}
+			return
 		} else {
 			return // Ignore packets for unknown sessions unless it's a SYN
 		}
