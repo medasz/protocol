@@ -15,6 +15,7 @@ type SendFunc func(ctx context.Context, payload []byte) error
 type TunnelManager struct {
 	mu       sync.RWMutex
 	sessions map[uint32]*ICMPConn
+	outbound chan []byte
 	sender   SendFunc
 
 	// OnSYN is called when a new SYN packet is received.
@@ -23,10 +24,29 @@ type TunnelManager struct {
 }
 
 // NewTunnelManager creates a new TunnelManager.
-func NewTunnelManager(sender SendFunc) *TunnelManager {
-	return &TunnelManager{
+func NewTunnelManager() *TunnelManager {
+	m := &TunnelManager{
 		sessions: make(map[uint32]*ICMPConn),
-		sender:   sender,
+		outbound: make(chan []byte, 1000),
+	}
+	m.sender = func(ctx context.Context, payload []byte) error {
+		select {
+		case m.outbound <- append([]byte(nil), payload...):
+		default:
+			// Queue full, drop packet (ARQ will retry)
+		}
+		return nil
+	}
+	return m
+}
+
+// TryDequeue returns an outbound packet if available.
+func (m *TunnelManager) TryDequeue() []byte {
+	select {
+	case p := <-m.outbound:
+		return p
+	default:
+		return nil
 	}
 }
 
@@ -90,11 +110,25 @@ func (m *TunnelManager) HandlePacket(b []byte) {
 	}
 }
 
-// Dial creates a new outbound ICMPConn.
-func (m *TunnelManager) Dial(sessionID uint32) net.Conn {
+// Dial creates a new outbound ICMPConn and sends a SYN packet with the initial payload.
+func (m *TunnelManager) Dial(sessionID uint32, synPayload []byte) net.Conn {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	conn := newICMPConn(sessionID, m.sender)
 	m.sessions[sessionID] = conn
+
+	// Send SYN
+	synBytes := make([]byte, protocol.TunnelHeaderSize)
+	synHeader := protocol.TunnelHeader{
+		SessionID: sessionID,
+		Type:      protocol.TunnelTypeSYN,
+		Length:    uint16(len(synPayload)),
+	}
+	_ = synHeader.Marshal(synBytes)
+	synBytes = append(synBytes, synPayload...)
+	_ = m.sender(context.Background(), synBytes)
+
+	// In a complete ARQ, we might need to retry the SYN if ACK isn't received.
+	// For simplicity, we just send it once and rely on application-level retries or the next DATA packet to re-establish state if needed.
 	return conn
 }

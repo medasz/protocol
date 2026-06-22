@@ -40,14 +40,7 @@ var buildSlaveRuntime = func(cfg slaveConfig) (serviceRunner, io.Closer, error) 
 		return nil, nil, fmt.Errorf("create shell error: %w", err)
 	}
 
-	tunnelListener := &transport.TunnelListener{
-		TargetIP: cfg.target,
-		Resolver: transport.OSResolver{},
-	}
-
-	tunnelManager := tunnel.NewTunnelManager(func(ctx context.Context, payload []byte) error {
-		return tunnelListener.SendAsync(append([]byte{protocol.ProtocolTunnel}, payload...))
-	})
+	tunnelManager := tunnel.NewTunnelManager()
 	tunnelManager.OnSYN = func(conn net.Conn, payload []byte) {
 		if len(payload) == 0 {
 			conn.Close()
@@ -103,7 +96,6 @@ var buildSlaveRuntime = func(cfg slaveConfig) (serviceRunner, io.Closer, error) 
 			Seq:      1,
 		},
 		Executor:       executor,
-		TunnelListener: tunnelListener,
 		TunnelManager:  tunnelManager,
 	}
 	return service, executor, nil

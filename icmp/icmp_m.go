@@ -73,30 +73,13 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 	}
 	
 	// Create TunnelManager
-	tm := tunnel.NewTunnelManager(func(ctx context.Context, payload []byte) error {
-		// Create a dummy RequestContext since we are initiating asynchronously
-		// The MasterResponder's SendAsync will build an Echo Reply
-		dstIP := net.ParseIP(parseMasterDstAllowlist(cfg.dst)[0]).To4()
-		req := protocol.RequestContext{
-			Meta: protocol.PacketMeta{
-				SrcIP: dstIP, // Reply destination is the target slave
-			},
-			Exchange: protocol.Exchange{
-				ID:  1,
-				Seq: 1,
-			},
-		}
-		return responder.SendAsync(req, append([]byte{protocol.ProtocolTunnel}, payload...))
-	})
+	tm := tunnel.NewTunnelManager()
 
 	if cfg.pty {
 		// In a real PTY, we'd set terminal to raw mode, but for now just use os.Stdin
 		go func() {
-			// Small delay to ensure Master Responder is listening
-			// This is hacky, but wait for serve to start.
-			conn := tm.Dial(1) // session ID 1 for PTY
-			// Send SYN with CmdShell
-			conn.Write([]byte{protocol.CmdShell})
+			// Small delay to ensure Slave is polling
+			conn := tm.Dial(1, []byte{protocol.CmdShell}) // session ID 1 for PTY
 			
 			go func() { _, _ = io.Copy(os.Stdout, conn) }()
 			_, _ = io.Copy(conn, os.Stdin)
@@ -107,12 +90,8 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 	var sessionID uint32 = 100 // start session IDs at 100 to avoid conflicts with PTY
 	dialer := func(target string) (net.Conn, error) {
 		sid := atomic.AddUint32(&sessionID, 1)
-		conn := tm.Dial(sid)
 		payload := append([]byte{protocol.CmdTCPDial}, []byte(target)...)
-		if _, err := conn.Write(payload); err != nil {
-			conn.Close()
-			return nil, err
-		}
+		conn := tm.Dial(sid, payload)
 		// In a complete implementation we would wait for a success/failure signal from slave.
 		// For now we assume success and return the connection.
 		return conn, nil

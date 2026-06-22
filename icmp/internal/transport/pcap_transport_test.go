@@ -112,7 +112,7 @@ func TestPcapPollClientExchange(t *testing.T) {
 		DstMAC: mustMAC(t, "66:77:88:99:aa:bb"),
 		SrcIP:  net.ParseIP("10.0.0.2").To4(),
 		DstIP:  net.ParseIP("10.0.0.1").To4(),
-	}, protocol.Exchange{ID: 9, Seq: 10, Payload: append([]byte{protocol.ProtocolShell}, []byte("ok")...)})
+	}, protocol.Exchange{ID: 9, Seq: 10, Payload: append([]byte{0x55, protocol.ProtocolShell}, []byte("ok")...)})
 	if err != nil {
 		t.Fatalf("BuildEchoRequest() error = %v", err)
 	}
@@ -139,7 +139,7 @@ func TestPcapPollClientExchange(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Exchange() error = %v", err)
 	}
-	if got, want := string(reply), "ok"; got != want {
+	if got, want := string(reply), "\x01ok"; got != want {
 		t.Fatalf("reply = %q, want %q", got, want)
 	}
 	if got, want := fh.filter, BuildSlaveFilter("10.0.0.2"); got != want {

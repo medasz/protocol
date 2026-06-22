@@ -43,7 +43,7 @@ func (f *fakeExecutor) Close() error { return nil }
 
 func TestSlaveServiceRunTestMode(t *testing.T) {
 	var log bytes.Buffer
-	client := &fakePollClient{reply: []byte("whoami")}
+	client := &fakePollClient{reply: []byte("\x01whoami")}
 	executor := &fakeExecutor{outputs: [][]byte{[]byte("hostname")}}
 	service := SlaveService{
 		Config: SlaveConfig{
@@ -58,7 +58,7 @@ func TestSlaveServiceRunTestMode(t *testing.T) {
 	if err := service.Run(context.Background()); err != nil {
 		t.Fatalf("Run() error = %v", err)
 	}
-	if len(client.sent) != 1 || string(client.sent[0]) != "hostname" {
+	if len(client.sent) != 1 || string(client.sent[0]) != "\x01hostname" {
 		t.Fatalf("unexpected sent payloads: %#v", client.sent)
 	}
 	if len(executor.executed) != 1 || string(executor.executed[0]) != "whoami" {
