@@ -191,7 +191,7 @@ func (c *ICMPConn) handleIncomingPacket(header protocol.TunnelHeader, payload []
 		return
 	}
 
-	if header.Type == protocol.TunnelTypeDATA && len(payload) > 0 {
+	if (header.Type == protocol.TunnelTypeDATA || header.Type == protocol.TunnelTypeSYN) && len(payload) > 0 {
 		c.unackedMu.Lock()
 		// Write to buffer
 		c.readBuf.Write(payload)
@@ -200,5 +200,7 @@ func (c *ICMPConn) handleIncomingPacket(header protocol.TunnelHeader, payload []
 		
 		// Send ACK
 		c.sendAck(header.Seq)
+	} else if header.Type == protocol.TunnelTypeFIN {
+		c.Close()
 	}
 }

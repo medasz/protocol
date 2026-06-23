@@ -4,6 +4,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"time"
 
 	"protocol/icmp/internal/protocol"
 )
@@ -117,18 +118,23 @@ func (m *TunnelManager) Dial(sessionID uint32, synPayload []byte) net.Conn {
 	conn := newICMPConn(sessionID, m.sender)
 	m.sessions[sessionID] = conn
 
-	// Send SYN
-	synBytes := make([]byte, protocol.TunnelHeaderSize)
-	synHeader := protocol.TunnelHeader{
+	conn.unackedMu.Lock()
+	hdr := protocol.TunnelHeader{
 		SessionID: sessionID,
 		Type:      protocol.TunnelTypeSYN,
+		Seq:       0, // Use Seq 0 for SYN
+		Ack:       0,
 		Length:    uint16(len(synPayload)),
 	}
-	_ = synHeader.Marshal(synBytes)
-	synBytes = append(synBytes, synPayload...)
-	_ = m.sender(context.Background(), synBytes)
+	conn.unacked[0] = &unackedPacket{
+		header:  hdr,
+		payload: synPayload,
+		sentAt:  time.Now(),
+	}
+	conn.nxtSeq = 1 // Next DATA packet will use Seq 1
+	conn.unackedMu.Unlock()
 
-	// In a complete ARQ, we might need to retry the SYN if ACK isn't received.
-	// For simplicity, we just send it once and rely on application-level retries or the next DATA packet to re-establish state if needed.
+	conn.send(hdr, synPayload)
+
 	return conn
 }
