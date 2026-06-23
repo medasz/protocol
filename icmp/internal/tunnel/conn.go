@@ -30,6 +30,7 @@ type ICMPConn struct {
 	
 	// ARQ State
 	nxtSeq    uint32
+	recvSeq   uint32
 	unacked   map[uint32]*unackedPacket
 	unackedMu sync.Mutex
 
@@ -125,11 +126,8 @@ func (c *ICMPConn) send(hdr protocol.TunnelHeader, payload []byte) {
 	buf.Write(hdrBytes)
 	buf.Write(payload)
 	
-	// Add ProtocolTunnel prefix byte
-	finalPayload := append([]byte{protocol.ProtocolTunnel}, buf.Bytes()...)
-	
 	// Sender must not block
-	c.sender(context.Background(), finalPayload)
+	c.sender(context.Background(), buf.Bytes())
 }
 
 func (c *ICMPConn) sendAck(ack uint32) {
@@ -191,15 +189,27 @@ func (c *ICMPConn) handleIncomingPacket(header protocol.TunnelHeader, payload []
 		return
 	}
 
-	if (header.Type == protocol.TunnelTypeDATA || header.Type == protocol.TunnelTypeSYN) && len(payload) > 0 {
+	if header.Type == protocol.TunnelTypeSYN {
+		// Retransmitted SYN (already handled in OnSYN but we need to ack it)
+		c.sendAck(header.Seq)
+	} else if header.Type == protocol.TunnelTypeDATA && len(payload) > 0 {
 		c.unackedMu.Lock()
-		// Write to buffer
-		c.readBuf.Write(payload)
-		c.readCond.Signal()
+		shouldAck := false
+		if header.Seq == c.recvSeq {
+			// Write to buffer
+			c.readBuf.Write(payload)
+			c.recvSeq++
+			c.readCond.Signal()
+			shouldAck = true
+		} else if header.Seq < c.recvSeq {
+			shouldAck = true
+		}
 		c.unackedMu.Unlock()
 		
-		// Send ACK
-		c.sendAck(header.Seq)
+		if shouldAck {
+			// Send ACK
+			c.sendAck(header.Seq)
+		}
 	} else if header.Type == protocol.TunnelTypeFIN {
 		c.Close()
 	}

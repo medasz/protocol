@@ -26,7 +26,7 @@ type SlaveService struct {
 	Executor shell.Executor
 
 	// Optional tunnel support
-	TunnelManager  *tunnel.TunnelManager
+	TunnelManager *tunnel.TunnelManager
 }
 
 func (s SlaveService) Run(ctx context.Context) error {
@@ -47,9 +47,11 @@ func (s SlaveService) Run(ctx context.Context) error {
 		}
 
 		var payload []byte
+		var hasMore bool
 		if s.TunnelManager != nil {
 			if tunnelBuf := s.TunnelManager.TryDequeue(); tunnelBuf != nil {
 				payload = append([]byte{protocol.ProtocolTunnel}, tunnelBuf...)
+				hasMore = s.TunnelManager.HasPending()
 			}
 		}
 		if payload == nil {
@@ -80,7 +82,14 @@ func (s SlaveService) Run(ctx context.Context) error {
 		if s.Config.TestMode {
 			return nil
 		}
-		if err := sleepContext(ctx, s.Config.Delay); err != nil {
+		
+		delay := s.Config.Delay
+		hasRealData := len(replyData) > 2 || len(outBuf) > 0
+		if hasMore || hasRealData {
+			delay = 0
+		}
+
+		if err := sleepContext(ctx, delay); err != nil {
 			return err
 		}
 	}

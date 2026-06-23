@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"log"
 
 	"protocol/icmp/internal/protocol"
 	"protocol/icmp/internal/transport"
@@ -43,7 +42,6 @@ func (s MasterService) Run(ctx context.Context) error {
 		payload := req.Exchange.Payload[1:]
 
 		if protoID == protocol.ProtocolTunnel {
-			log.Printf("[Master] Received ProtocolTunnel length=%d", len(payload))
 			if s.TunnelManager != nil {
 				s.TunnelManager.HandlePacket(payload)
 			}
@@ -58,17 +56,19 @@ func (s MasterService) Run(ctx context.Context) error {
 		// Try to send tunnel packets first
 		if s.TunnelManager != nil {
 			if tunnelBuf := s.TunnelManager.TryDequeue(); tunnelBuf != nil {
-				log.Printf("[Master] Sending ProtocolTunnel length=%d", len(tunnelBuf))
 				return append([]byte{0x55, protocol.ProtocolTunnel}, tunnelBuf...), nil
 			}
 		}
 
 		if s.Commands == nil {
-			return []byte{0x55, protocol.ProtocolShell}, nil
+			return []byte{0x55, protocol.ProtocolTunnel}, nil
 		}
 		cmd, err := s.Commands.NextCommand(ctx, agentIP)
 		if err != nil {
 			return nil, err
+		}
+		if cmd == nil {
+			return []byte{0x55, protocol.ProtocolTunnel}, nil
 		}
 		return append([]byte{0x55, protocol.ProtocolShell}, cmd...), nil
 	})

@@ -75,19 +75,19 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 	// Create TunnelManager
 	tm := tunnel.NewTunnelManager()
 
+	var sessionID uint32 = 100 // start session IDs at 100
 	if cfg.pty {
 		// In a real PTY, we'd set terminal to raw mode, but for now just use os.Stdin
 		go func() {
 			// Small delay to ensure Slave is polling
-			conn := tm.Dial(1, []byte{protocol.CmdShell}) // session ID 1 for PTY
+			sid := atomic.AddUint32(&sessionID, 1)
+			conn := tm.Dial(sid, []byte{protocol.CmdShell}) // dynamic session ID for PTY
 			
 			go func() { _, _ = io.Copy(os.Stdout, conn) }()
 			_, _ = io.Copy(conn, os.Stdin)
 			conn.Close()
 		}()
 	}
-
-	var sessionID uint32 = 100 // start session IDs at 100 to avoid conflicts with PTY
 	dialer := func(target string) (net.Conn, error) {
 		sid := atomic.AddUint32(&sessionID, 1)
 		payload := append([]byte{protocol.CmdTCPDial}, []byte(target)...)
