@@ -77,7 +77,7 @@ func TestHubBroadcastsOutputToAgentSubscribers(t *testing.T) {
 func TestHandleAgentsReturnsHubAgents(t *testing.T) {
 	hub := NewHub()
 	hub.TouchAgent("10.0.0.2", "00:11:22:33:44:55")
-	server := NewServer(hub)
+	server := NewServer(hub, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/agents", nil)
 	rec := httptest.NewRecorder()
@@ -96,7 +96,7 @@ func TestHandleAgentsReturnsHubAgents(t *testing.T) {
 }
 
 func TestHandleTerminalRejectsMissingOrUnknownAgent(t *testing.T) {
-	server := NewServer(NewHub())
+	server := NewServer(NewHub(), nil, nil)
 	ts := httptest.NewServer(http.HandlerFunc(server.handleTerminal))
 	defer ts.Close()
 
@@ -115,7 +115,7 @@ func TestHandleTerminalRejectsMissingOrUnknownAgent(t *testing.T) {
 func TestHandleTerminalRoutesWebSocketByAgent(t *testing.T) {
 	hub := NewHub()
 	hub.TouchAgent("10.0.0.2", "")
-	server := NewServer(hub)
+	server := NewServer(hub, nil, nil)
 	ts := httptest.NewServer(http.HandlerFunc(server.handleTerminal))
 	defer ts.Close()
 

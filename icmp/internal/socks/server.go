@@ -24,6 +24,17 @@ func NewServer(addr string, dialer Dialer) *Server {
 	}
 }
 
+// Start starts the SOCKS5 server on the provided listener.
+func (s *Server) Start(l net.Listener) {
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		go s.handleConnection(conn)
+	}
+}
+
 // ListenAndServe starts the SOCKS5 server and blocks until an error occurs.
 func (s *Server) ListenAndServe() error {
 	l, err := net.Listen("tcp", s.addr)
@@ -31,13 +42,8 @@ func (s *Server) ListenAndServe() error {
 		return err
 	}
 	defer l.Close()
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			continue
-		}
-		go s.handleConnection(conn)
-	}
+	s.Start(l)
+	return nil
 }
 
 func (s *Server) handleConnection(conn net.Conn) {

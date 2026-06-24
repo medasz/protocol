@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"io"
 	"log"
+	"net"
 	"net/http"
 	"sort"
 	"sync"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"protocol/icmp/frontend"
+	"protocol/icmp/internal/socks"
 )
 
 var upgrader = websocket.Upgrader{
@@ -164,16 +167,31 @@ func (h *Hub) ensureSessionLocked(agentIP string) *agentSession {
 }
 
 type Server struct {
-	hub *Hub
+	hub         *Hub
+	dialer      func(target string) (net.Conn, error)
+	dialPty     func() (net.Conn, error)
+	servicesMu  sync.Mutex
+	activeSocks map[string]net.Listener
+	activeFwd   map[string]net.Listener
 }
 
-func NewServer(hub *Hub) *Server {
-	return &Server{hub: hub}
+func NewServer(hub *Hub, dialer func(target string) (net.Conn, error), dialPty func() (net.Conn, error)) *Server {
+	return &Server{
+		hub:         hub,
+		dialer:      dialer,
+		dialPty:     dialPty,
+		activeSocks: make(map[string]net.Listener),
+		activeFwd:   make(map[string]net.Listener),
+	}
 }
 
 func (s *Server) Start(addr string) error {
 	http.HandleFunc("/api/agents", s.handleAgents)
+	http.HandleFunc("/api/services", s.handleServices)
+	http.HandleFunc("/api/services/socks", s.handleSocks)
+	http.HandleFunc("/api/services/fwd", s.handleFwd)
 	http.HandleFunc("/ws/terminal", s.handleTerminal)
+	http.HandleFunc("/ws/pty", s.handlePty)
 
 	dist, err := fs.Sub(frontend.DistFS, "dist")
 	if err != nil {
@@ -188,6 +206,126 @@ func (s *Server) Start(addr string) error {
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(s.hub.Agents())
+}
+
+func (s *Server) handleServices(w http.ResponseWriter, r *http.Request) {
+	s.servicesMu.Lock()
+	defer s.servicesMu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	
+	type ServiceInfo struct {
+		Type   string `json:"type"`
+		Port   string `json:"port"`
+		Target string `json:"target,omitempty"`
+	}
+	var res []ServiceInfo
+	for p := range s.activeSocks {
+		res = append(res, ServiceInfo{Type: "socks5", Port: p})
+	}
+	for p := range s.activeFwd {
+		// Just returning the port for simplicity, could map to target
+		res = append(res, ServiceInfo{Type: "fwd", Port: p})
+	}
+	json.NewEncoder(w).Encode(res)
+}
+
+func (s *Server) handleSocks(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Methods", "POST, DELETE")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	
+	var req struct{ Port string `json:"port"` }
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	
+	s.servicesMu.Lock()
+	defer s.servicesMu.Unlock()
+	
+	if r.Method == http.MethodPost {
+		if _, ok := s.activeSocks[req.Port]; ok {
+			http.Error(w, "already running", http.StatusConflict)
+			return
+		}
+		l, err := net.Listen("tcp", ":"+req.Port)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		srv := socks.NewServer(":"+req.Port, s.dialer)
+		go srv.Start(l)
+		s.activeSocks[req.Port] = l
+		w.WriteHeader(http.StatusOK)
+		
+	} else if r.Method == http.MethodDelete {
+		if l, ok := s.activeSocks[req.Port]; ok {
+			l.Close()
+			delete(s.activeSocks, req.Port)
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func (s *Server) handleFwd(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodOptions {
+		w.Header().Set("Access-Control-Allow-Methods", "POST, DELETE")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	
+	var req struct {
+		LocalPort string `json:"localPort"`
+		Target    string `json:"target"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	
+	s.servicesMu.Lock()
+	defer s.servicesMu.Unlock()
+	
+	if r.Method == http.MethodPost {
+		if _, ok := s.activeFwd[req.LocalPort]; ok {
+			http.Error(w, "already running", http.StatusConflict)
+			return
+		}
+		l, err := net.Listen("tcp", ":"+req.LocalPort)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.activeFwd[req.LocalPort] = l
+		go func(listener net.Listener, target string) {
+			for {
+				c, err := listener.Accept()
+				if err != nil {
+					return
+				}
+				go func(conn net.Conn) {
+					defer conn.Close()
+					targetConn, err := s.dialer(target)
+					if err != nil {
+						return
+					}
+					defer targetConn.Close()
+					go func() { _, _ = io.Copy(targetConn, conn) }()
+					_, _ = io.Copy(conn, targetConn)
+				}(c)
+			}
+		}(l, req.Target)
+		w.WriteHeader(http.StatusOK)
+		
+	} else if r.Method == http.MethodDelete {
+		if l, ok := s.activeFwd[req.LocalPort]; ok {
+			l.Close()
+			delete(s.activeFwd, req.LocalPort)
+		}
+		w.WriteHeader(http.StatusOK)
+	}
 }
 
 func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
@@ -234,6 +372,51 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 			return
 		case output := <-outputs:
 			if err := conn.WriteMessage(websocket.TextMessage, output); err != nil {
+				return
+			}
+		}
+	}
+}
+
+func (s *Server) handlePty(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("WS Upgrade error:", err)
+		return
+	}
+	defer conn.Close()
+
+	if s.dialPty == nil {
+		return
+	}
+	ptyConn, err := s.dialPty()
+	if err != nil {
+		return
+	}
+	defer ptyConn.Close()
+
+	// ws -> pty
+	go func() {
+		for {
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			if _, err := ptyConn.Write(message); err != nil {
+				return
+			}
+		}
+	}()
+
+	// pty -> ws
+	buf := make([]byte, 4096)
+	for {
+		n, err := ptyConn.Read(buf)
+		if err != nil {
+			return
+		}
+		if n > 0 {
+			if err := conn.WriteMessage(websocket.TextMessage, buf[:n]); err != nil {
 				return
 			}
 		}

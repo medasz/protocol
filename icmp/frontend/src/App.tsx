@@ -2,9 +2,11 @@ import { useState } from 'react';
 import TopNav from './components/TopNav';
 import AgentList from './components/AgentList';
 import Terminal from './components/Terminal';
+import NetworkPanel from './components/NetworkPanel';
 
 function App() {
   const [selectedIp, setSelectedIp] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'terminal' | 'network'>('terminal');
 
   return (
     <div className="app-container">
@@ -12,8 +14,30 @@ function App() {
       <AgentList onSelect={setSelectedIp} selectedIp={selectedIp} />
       <main className="main-content">
         {selectedIp ? (
-          <div className="terminal-container">
-            <Terminal agentIp={selectedIp} key={selectedIp} />
+          <div className="workspace">
+            <div className="workspace-tabs">
+              <button 
+                className={`tab-btn ${activeTab === 'terminal' ? 'active' : ''}`}
+                onClick={() => setActiveTab('terminal')}
+              >
+                Terminal
+              </button>
+              <button 
+                className={`tab-btn ${activeTab === 'network' ? 'active' : ''}`}
+                onClick={() => setActiveTab('network')}
+              >
+                Network Services
+              </button>
+            </div>
+            <div className="workspace-content">
+              {activeTab === 'terminal' ? (
+                <div className="terminal-container">
+                  <Terminal agentIp={selectedIp} key={selectedIp} />
+                </div>
+              ) : (
+                <NetworkPanel />
+              )}
+            </div>
           </div>
         ) : (
           <div className="placeholder-view">

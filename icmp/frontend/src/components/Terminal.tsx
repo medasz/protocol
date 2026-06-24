@@ -10,6 +10,7 @@ interface TerminalProps {
 const Terminal: React.FC<TerminalProps> = ({ agentIp }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
+  const [mode, setMode] = useState<'shell' | 'pty'>('shell');
 
   useEffect(() => {
     if (!terminalRef.current) return;
@@ -37,9 +38,9 @@ const Terminal: React.FC<TerminalProps> = ({ agentIp }) => {
     if (wsHost.includes('5173')) {
        wsHost = 'localhost:8080';
     }
-    const wsUrl = `${wsProtocol}//${wsHost}/ws/terminal?ip=${encodeURIComponent(agentIp)}`;
+    const wsUrl = `${wsProtocol}//${wsHost}/ws/${mode === 'pty' ? 'pty' : 'terminal'}?ip=${encodeURIComponent(agentIp)}`;
     
-    term.writeln(`\x1b[32m[+]\x1b[0m Opening session for ${agentIp}...`);
+    term.writeln(`\x1b[32m[+]\x1b[0m Opening ${mode.toUpperCase()} session for ${agentIp}...`);
     
     const ws = new WebSocket(wsUrl);
 
@@ -95,7 +96,7 @@ const Terminal: React.FC<TerminalProps> = ({ agentIp }) => {
       ws.close();
       term.dispose();
     };
-  }, [agentIp]);
+  }, [agentIp, mode]);
 
   return (
     <section className="terminal-session" aria-label={`Terminal session for ${agentIp}`}>
@@ -103,6 +104,18 @@ const Terminal: React.FC<TerminalProps> = ({ agentIp }) => {
         <span className={`terminal-status ${status}`}></span>
         <span className="terminal-agent">{agentIp}</span>
         <span className="terminal-state">{status}</span>
+        <div className="terminal-mode-switch">
+          <button 
+            className={`mode-btn ${mode === 'shell' ? 'active' : ''}`}
+            onClick={() => setMode('shell')}
+            disabled={status === 'connecting'}
+          >SHELL</button>
+          <button 
+            className={`mode-btn ${mode === 'pty' ? 'active' : ''}`}
+            onClick={() => setMode('pty')}
+            disabled={status === 'connecting'}
+          >PTY</button>
+        </div>
       </div>
       <div ref={terminalRef} className="xterm-wrapper" />
     </section>

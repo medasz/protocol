@@ -37,9 +37,26 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 	var cmds app.CommandSource
 	var results app.ResultSink
 
+	// Create TunnelManager and dialer before web so web server can use it for Socks/FWD APIs
+	tm := tunnel.NewTunnelManager()
+	var sessionID uint32 = 100 // start session IDs at 100
+	dialer := func(target string) (net.Conn, error) {
+		sid := atomic.AddUint32(&sessionID, 1)
+		payload := append([]byte{protocol.CmdTCPDial}, []byte(target)...)
+		conn := tm.Dial(sid, payload)
+		// In a complete implementation we would wait for a success/failure signal from slave.
+		// For now we assume success and return the connection.
+		return conn, nil
+	}
+	dialPty := func() (net.Conn, error) {
+		sid := atomic.AddUint32(&sessionID, 1)
+		conn := tm.Dial(sid, []byte{protocol.CmdShell})
+		return conn, nil
+	}
+
 	if cfg.web {
 		hub := web.NewHub()
-		srv := web.NewServer(hub)
+		srv := web.NewServer(hub, dialer, dialPty)
 		go func() {
 			if err := srv.Start(":" + cfg.port); err != nil {
 				os.Exit(1)
@@ -56,6 +73,7 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 			Commands: cmds,
 			Results:  results,
 			Agents:   hub,
+			TunnelManager: tm,
 		}
 	} else {
 		cmds = nil
@@ -71,11 +89,6 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 		AllowedDstIPs: parseMasterDstAllowlist(cfg.dst),
 		Resolver:      transport.OSResolver{},
 	}
-	
-	// Create TunnelManager
-	tm := tunnel.NewTunnelManager()
-
-	var sessionID uint32 = 100 // start session IDs at 100
 	if cfg.pty {
 		// In a real PTY, we'd set terminal to raw mode, but for now just use os.Stdin
 		go func() {
@@ -87,14 +100,6 @@ var buildMasterRunner = func(cfg masterConfig) serviceRunner {
 			_, _ = io.Copy(conn, os.Stdin)
 			conn.Close()
 		}()
-	}
-	dialer := func(target string) (net.Conn, error) {
-		sid := atomic.AddUint32(&sessionID, 1)
-		payload := append([]byte{protocol.CmdTCPDial}, []byte(target)...)
-		conn := tm.Dial(sid, payload)
-		// In a complete implementation we would wait for a success/failure signal from slave.
-		// For now we assume success and return the connection.
-		return conn, nil
 	}
 
 	if cfg.socks != "" {
