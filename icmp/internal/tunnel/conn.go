@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	defaultMTU       = 1000
-	retransmitDelay  = 500 * time.Millisecond
+	defaultMTU        = 1000
+	retransmitDelay   = 500 * time.Millisecond
 	arqTickerInterval = 100 * time.Millisecond
+	sendWindowSize    = 64
 )
 
 type unackedPacket struct {
@@ -33,6 +34,9 @@ type ICMPConn struct {
 	recvSeq   uint32
 	unacked   map[uint32]*unackedPacket
 	unackedMu sync.Mutex
+	sendCond  *sync.Cond
+	
+	outOfOrder map[uint32][]byte
 
 	// Read buffer
 	readBuf  bytes.Buffer
@@ -45,12 +49,14 @@ type ICMPConn struct {
 
 func newICMPConn(sessionID uint32, sender SendFunc) *ICMPConn {
 	c := &ICMPConn{
-		sessionID: sessionID,
-		sender:    sender,
-		unacked:   make(map[uint32]*unackedPacket),
-		closeCh:   make(chan struct{}),
+		sessionID:  sessionID,
+		sender:     sender,
+		unacked:    make(map[uint32]*unackedPacket),
+		outOfOrder: make(map[uint32][]byte),
+		closeCh:    make(chan struct{}),
 	}
 	c.readCond = sync.NewCond(&c.unackedMu) // Reusing mutex for readCond is fine
+	c.sendCond = sync.NewCond(&c.unackedMu)
 	go c.arqLoop()
 	return c
 }
@@ -91,6 +97,16 @@ func (c *ICMPConn) Write(b []byte) (n int, err error) {
 		payload := b[offset : offset+chunkSize]
 		
 		c.unackedMu.Lock()
+		
+		for len(c.unacked) >= sendWindowSize && !c.isClosed {
+			c.sendCond.Wait()
+		}
+		
+		if c.isClosed {
+			c.unackedMu.Unlock()
+			return offset, io.ErrClosedPipe
+		}
+
 		seq := c.nxtSeq
 		c.nxtSeq++
 		
@@ -171,6 +187,7 @@ func (c *ICMPConn) Close() error {
 	c.isClosed = true
 	close(c.closeCh)
 	c.readCond.Broadcast() // wake up any readers
+	c.sendCond.Broadcast() // wake up any blocked writers
 	c.unackedMu.Unlock()
 	return nil
 }
@@ -184,7 +201,10 @@ func (c *ICMPConn) SetWriteDeadline(t time.Time) error { return nil }
 func (c *ICMPConn) handleIncomingPacket(header protocol.TunnelHeader, payload []byte) {
 	if header.Type == protocol.TunnelTypeACK {
 		c.unackedMu.Lock()
-		delete(c.unacked, header.Ack)
+		if _, exists := c.unacked[header.Ack]; exists {
+			delete(c.unacked, header.Ack)
+			c.sendCond.Signal()
+		}
 		c.unackedMu.Unlock()
 		return
 	}
@@ -200,6 +220,25 @@ func (c *ICMPConn) handleIncomingPacket(header protocol.TunnelHeader, payload []
 			c.readBuf.Write(payload)
 			c.recvSeq++
 			c.readCond.Signal()
+			shouldAck = true
+			
+			// Check if we have consecutive out-of-order packets
+			for {
+				if nextPayload, ok := c.outOfOrder[c.recvSeq]; ok {
+					c.readBuf.Write(nextPayload)
+					delete(c.outOfOrder, c.recvSeq)
+					c.recvSeq++
+				} else {
+					break
+				}
+			}
+		} else if header.Seq > c.recvSeq {
+			// Cache out of order packet
+			if _, exists := c.outOfOrder[header.Seq]; !exists {
+				clonedPayload := make([]byte, len(payload))
+				copy(clonedPayload, payload)
+				c.outOfOrder[header.Seq] = clonedPayload
+			}
 			shouldAck = true
 		} else if header.Seq < c.recvSeq {
 			shouldAck = true

