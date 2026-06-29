@@ -13,8 +13,8 @@ import (
 
 const (
 	defaultMTU        = 1000
-	retransmitDelay   = 500 * time.Millisecond
-	arqTickerInterval = 100 * time.Millisecond
+	retransmitDelay   = 100 * time.Millisecond
+	arqTickerInterval = 20 * time.Millisecond
 	sendWindowSize    = 64
 )
 
@@ -121,7 +121,7 @@ func (c *ICMPConn) Write(b []byte) (n int, err error) {
 		c.unacked[seq] = &unackedPacket{
 			header:  hdr,
 			payload: payload, // note: aliasing b, fine as long as caller doesn't modify
-			sentAt:  time.Now(),
+			sentAt:  time.Time{}, // Queue time: zero value means not yet sent on wire
 		}
 		c.unackedMu.Unlock()
 
@@ -168,8 +168,8 @@ func (c *ICMPConn) arqLoop() {
 			c.unackedMu.Lock()
 			now := time.Now()
 			for _, p := range c.unacked {
-				if now.Sub(p.sentAt) > retransmitDelay {
-					p.sentAt = now
+				if !p.sentAt.IsZero() && now.Sub(p.sentAt) > retransmitDelay {
+					p.sentAt = time.Time{} // Reset to zero time since it's re-queued
 					c.send(p.header, p.payload)
 				}
 			}

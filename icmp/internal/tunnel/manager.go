@@ -45,9 +45,32 @@ func NewTunnelManager() *TunnelManager {
 func (m *TunnelManager) TryDequeue() []byte {
 	select {
 	case p := <-m.outbound:
+		m.updateSentAt(p)
 		return p
 	default:
 		return nil
+	}
+}
+
+// updateSentAt parses the tunnel packet header and updates the packet's sentAt
+// timestamp to now, indicating it has been sent on the wire and ARQ timeout should begin.
+func (m *TunnelManager) updateSentAt(b []byte) {
+	if len(b) < protocol.TunnelHeaderSize {
+		return
+	}
+	header, err := protocol.UnmarshalTunnelHeader(b)
+	if err != nil {
+		return
+	}
+	m.mu.RLock()
+	conn, exists := m.sessions[header.SessionID]
+	m.mu.RUnlock()
+	if exists {
+		conn.unackedMu.Lock()
+		if p, ok := conn.unacked[header.Seq]; ok {
+			p.sentAt = time.Now()
+		}
+		conn.unackedMu.Unlock()
 	}
 }
 
@@ -135,7 +158,7 @@ func (m *TunnelManager) Dial(sessionID uint32, synPayload []byte) net.Conn {
 	conn.unacked[0] = &unackedPacket{
 		header:  hdr,
 		payload: synPayload,
-		sentAt:  time.Now(),
+		sentAt:  time.Time{}, // Zero time: not yet sent
 	}
 	conn.nxtSeq = 1 // Next DATA packet will use Seq 1
 	conn.unackedMu.Unlock()

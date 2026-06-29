@@ -103,8 +103,8 @@ var buildSlaveRuntime = func(cfg slaveConfig) (serviceRunner, io.Closer, error) 
 			ID:       1,
 			Seq:      1,
 		},
-		Executor:       executor,
-		TunnelManager:  tunnelManager,
+		Executor:      executor,
+		TunnelManager: tunnelManager,
 	}
 	return service, executor, nil
 }
