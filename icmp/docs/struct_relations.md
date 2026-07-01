@@ -35,7 +35,7 @@ graph TD
         WebHub["web.Hub (实现 CommandSource/ResultSink)"]
         TunnelM["tunnel.TunnelManager (并发多路复用)"]
         PcapTrans["transport.PcapMasterResponder (实现 MasterResponder)"]
-        RawTrans["transport.RawSocketSlaveTransport (实现 PollClient)"]
+        PcapTransSlave["transport.PcapPollClient (实现 PollClient)"]
         CmdShell["shell.CmdShell (实现 shell.Executor)"]
     end
 
@@ -81,7 +81,7 @@ graph TD
     WebHub -.->|实现| CmdInt
     WebHub -.->|实现| ResInt
     PcapTrans -.->|实现| TransMasterInt
-    RawTrans -.->|实现| TransSlaveInt
+    PcapTransSlave -.->|实现| TransSlaveInt
     CmdShell -.->|实现| ExecInt
 
     %% L2 依赖 L1 数据包
@@ -90,7 +90,7 @@ graph TD
 
     %% 赋予颜色
     class MasterSrv,SlaveSrv,WebServer,SocksSrv l4;
-    class TunnelM,WebHub,CmdShell,PcapTrans,RawTrans l3;
+    class TunnelM,WebHub,CmdShell,PcapTrans,PcapTransSlave l3;
     class ICMPConn,CmdInt,ResInt,ExecInt,TransMasterInt,TransSlaveInt l2;
     class THeader,PMeta l1;
 ```
@@ -171,4 +171,4 @@ type Executor interface {
 	Close() error
 }
 ```
-**实现者**：`RawSocketSlaveTransport` 签署了 `PollClient`，而 `shell.CmdShell` 签署了 `Executor`。
+**实现者**：`PcapPollClient` 签署了 `PollClient`，而 `shell.CmdShell` 签署了 `Executor`。
